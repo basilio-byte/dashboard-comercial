@@ -48,9 +48,23 @@ Repositório clonado vazio. Nenhum código de aplicação escrito ainda.
   ainda será desenhada.
 - Cada canal tem **toggle de ligar/desligar**, e existe uma **página de Configurações**.
 
-**Próximo passo — Fase 0 do [roadmap](roadmap.md).** As cinco provas de acesso que decidem o escopo
-real do projeto. Nenhuma linha de aplicação antes delas.
+**Ferramenta da Fase 0 pronta.** `scripts/fase-0-provas.mjs` roda as seis medições contra a API e
+gera `docs/context/fase-0-resultado.md` (ignorado pelo git — pode conter dado de cliente real).
+Somente leitura por construção: método fixo em `GET`, sem parâmetro de `method` nem `body`. Ritmo
+default de 15 req/min e disjuntor de 80 requisições, para não competir com o financeiro.
+Verificado contra servidor mock com as formas reais da coleção, incluindo o caminho de 403.
+
+```bash
+CONEXA_API_TOKEN=<token do 1Password> node scripts/fase-0-provas.mjs
+```
+
+**Próximo passo — rodar a Fase 0.** Nenhuma linha de aplicação antes disso.
 
 **Bloqueios.** As perguntas 🔴 de [perguntas-abertas.md](perguntas-abertas.md), especialmente:
 o teto de 60 req/min é por token ou por conta; o token tem acesso a `/room/bookings`; e qual é o
 `list_id` da lista alvo no ClickUp.
+
+**Nota de infraestrutura.** O repositório é da conta `basilio-byte` e o git local commita como
+`basiliolp` — o primeiro push deu 403 até o dono conceder acesso. O projeto irmão publica a imagem
+sob `ghcr.io/basiliolp/`, ou seja, a **outra** conta: decidir conscientemente onde a imagem do
+comercial vai morar.
