@@ -4,6 +4,48 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-25 — Fase 0 executada · veredito GO
+
+Rodadas as provas de acesso contra a **API de produção**, com token de admin, somente leitura
+(~30 requisições a 15 req/min). Conclusões completas em
+[fase-0-conclusoes.md](fase-0-conclusoes.md).
+
+**Nenhum bloqueio de acesso — e duas regras saíram de "impossível" para viável.**
+
+| Prova | Resultado |
+|---|---|
+| `/room/bookings` responde? | ✅ 200, com `deductedFromQuota` em dado real |
+| Rate limit por token ou conta? | ⚠️ só indício — segue como pergunta à Conexa |
+| `/contracts` devolve `extraFields`? | ✅ 20/20 — mas **nenhum preenchido** |
+| `sale.quantity` carrega horas? | ✅ 20/20 pares concordam |
+| `hourPlanQuota` preenchido? | ⚠️ 17/100 contratos ativos; **100% por grupo** |
+| "Panteão" existe? | ✅ ids 3380 e 3381 |
+
+**Três conclusões minhas caíram:**
+
+1. **"Panteão não existe"** — existe. Eu tinha me baseado num **export manual** de produtos, não
+   na API. O export estava incompleto.
+2. **"O tier do Endereço Fiscal não é obtenível"** — é, e por um caminho melhor que o nome: a
+   **cota do plano**. Litoral não tem cota (`hourQuotas: null`), Batial tem 2h, Abissal 8h,
+   Comércio/Black 6h, Simples 4h. O predicado da regra 10 vira dado, não texto. E o "Batial (2h
+   mensais inclusas)" do documento do cliente está **confirmado pela API**.
+3. **"Cotas por grupo são irrecuperáveis"** — não são. Os endpoints de grupo realmente não
+   existem (404 medido em 7 rotas), e 100% das cotas são por grupo (um único, `id: 2`). Mas saber
+   quem está no grupo é desnecessário: **o Conexa marca a reserva abatida**. Isso devolve as
+   regras 2 e 9 ao jogo.
+
+Também revertido o rebaixamento de `sale.quantity`: a coleção Postman tipa como `integer` e
+"quantidade de itens", mas o dado real carrega horas fracionárias — 20/20.
+
+**O que continua em aberto:** o teto de 60 req/min é por token ou por conta (pergunta 1), e as
+três incógnitas do ciclo da cota — âncora, carry-over e dedução parcial. Nenhuma tem resposta na
+API; são comportamento de produto.
+
+**Efeito no roadmap.** Fase 1 liberada. Fase 3 continua existindo, com escopo menor: falta medir o
+**ciclo**, não a atribuição de consumo. Fase 8 encolhe — as regras 8 e 10 saem de lá.
+
+---
+
 ## 2026-08-25 — Esqueleto e cadeia de deploy, verificados
 
 **Feito.** Projeto Next.js 15 + Prisma + Tailwind, `Dockerfile` multi-stage, `docker-entrypoint.sh`,
@@ -68,9 +110,11 @@ Repositório clonado vazio. Nenhum código de aplicação escrito ainda.
    (`booking.startTime`/`finalTime` + `status: deductedFromQuota`) são expostos pela API. O que
    não existe é o **saldo** — que é derivável, com três incógnitas (âncora do ciclo, carry-over,
    dedução parcial). Virou uma fase de medição que pode reprovar ([ADR-0005](decisions.md)).
-2. **Duas regras estão bloqueadas por dado que não existe.** "Panteão" não está em nenhum dos 217
-   produtos do Conexa; e o tier do Endereço Fiscal (Litoral, Batial, Abissal…) **não é campo da
-   API** — todos caem na mesma categoria de serviço.
+   *(Confirmado na Fase 0, inclusive a derivação rodando num cliente real.)*
+2. ~~**Duas regras estão bloqueadas por dado que não existe.**~~ **⚠ SUPERADO pela Fase 0** — as
+   duas foram desbloqueadas. O "Panteão não existe" vinha de um export manual incompleto, e o tier
+   do Endereço Fiscal se resolve pela **cota do plano**, não pelo nome. Ver a entrada da Fase 0
+   no topo.
 3. **O rate limit de 60 req/min é compartilhado** com um sistema já em produção, e a mitigação
    óbvia ("janelas desencontradas") é inimplementável com o agendador que se pretendia copiar.
 4. **A especificação diz quando ofertar e nunca quando NÃO ofertar.** Faltava gate de elegibilidade

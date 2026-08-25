@@ -187,9 +187,14 @@ Errar a âncora move o saldo em **até um ciclo inteiro**.
 - **`INDISPONIVEL ⇒ NULL`, garantido por `CHECK` no Postgres.** Nunca `0`. "0h de saldo" é uma
   afirmação forte (o cliente esgotou a cota); "saldo desconhecido" é outra coisa, e confundir as
   duas dispara a regra errada.
-- **Cotas por `groupId` são BLOQUEADAS.** Não existe `/rooms`, `/spaces` nem `/spaceGroups` na API
-  (404 medido pelo projeto irmão). Sem saber quais salas compõem cada grupo, não há como saber
-  quais reservas consomem a cota. Marcadas `INDISPONIVEL`, nunca estimadas.
+- ✅ **CORRIGIDO pela Fase 0 — cotas por `groupId` NÃO são bloqueadas.** É verdade que não existe
+  endpoint de grupo ou sala (medido em produção: `/rooms`, `/spaces`, `/spaceGroups`,
+  `/roomGroups`, `/room/groups`, `/privateSpaces`, `/packages` → **todos 404**), e que **100% das
+  cotas reais da Seahub são por grupo**, num **único grupo** (`id: 2`, usado pelos 24 planos com
+  cota). Mas saber quem está no grupo é **desnecessário**: o próprio Conexa marca a reserva
+  abatida com `status: "deductedFromQuota"`. A pergunta "esta reserva consome a cota?" já vem
+  respondida no dado. A afirmação anterior — de que essas cotas ficariam permanentemente
+  indisponíveis — estava errada, e a correção **devolve as regras 2 e 9 ao jogo**.
 - **Portão de reprovação explícito.** O cliente exporta a tela de saldo do Conexa para ≥ 20
   clientes reais, cobrindo cota por sala, cota por grupo, pacote recorrente, contrato + pacote, e
   cliente que estourou a cota. Critérios: ≥ 95% dos baldes dentro de ± 0,25 h **e 100% de
