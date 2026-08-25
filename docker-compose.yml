@@ -1,0 +1,56 @@
+# Uso local de desenvolvimento e referência para o Easypanel.
+#
+# No Easypanel NÃO se usa este arquivo: cria-se um serviço Postgres e um
+# serviço App do tipo "Docker Image" apontando para
+# ghcr.io/basilio-byte/dashboard-comercial:latest, com as variáveis como ENV.
+# Ver README.md.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: comercial
+      POSTGRES_PASSWORD: comercial
+      POSTGRES_DB: seahub_comercial
+    ports:
+      - "5433:5432" # 5433 p/ não colidir com o Postgres do financeiro
+    volumes:
+      - comercial_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U comercial -d seahub_comercial"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_URL: http://localhost:3000
+      APP_TIMEZONE: America/Fortaleza
+      DATABASE_URL: postgres://comercial:comercial@db:5432/seahub_comercial
+      SESSION_SECRET: ${SESSION_SECRET:-dev-secret-troque-em-producao}
+      CONEXA_BASE_URL: https://seahubcoworking.conexa.app/index.php/api/v2
+      CONEXA_API_TOKEN: ${CONEXA_API_TOKEN:-}
+      CONEXA_RATE_LIMIT_PER_MIN: "15"
+      # Disparo desligado — todos os defaults fecham (ADR-0004).
+      NOTIFICADOR: "off"
+      NOTIFICADOR_MODO: dry-run
+      CLICKUP_ENABLED: "off"
+      CHATWOOT_ENABLED: "off"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ports:
+      - "3000:3000"
+    # Tempo para o tini encaminhar o SIGTERM e a aplicação drenar antes do kill.
+    stop_grace_period: 30s
+
+volumes:
+  comercial_pgdata:

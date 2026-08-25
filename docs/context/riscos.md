@@ -27,7 +27,7 @@ contra a coleção Postman · operação e deploy · risco de negócio) mais um 
 | **A4** | **A defesa contra a falha irreversível era um grep**, sobre um cliente cujo default manda a mensagem ao cliente final | O código errado **não contém** a string procurada — ele apenas *esquece* `{ privado: true }` | [ADR-0012](decisions.md) — o tipo torna a mensagem pública inexpressável |
 | **A5** | **A premissa da Fase 2 era falsa.** "Janela de data passada é imutável" | Existe `PATCH /room/booking/:id` alterando `date`/`startTime`/`finalTime`: a reserva **se move** entre janelas. E o critério "a contagem bate" passa enquanto o conteúdo está errado | Usar `createdAtFrom/To` **também**, reparo por id, re-varredura periódica, e trocar o critério para **hash do conjunto** |
 | **A6** | **`enterrarZumbis()` e multi-réplica são incompatíveis**, e o plano adotava os dois | O boot da réplica B mata o backfill vivo da réplica A **e** libera a guarda — as duas passam a atacar a API juntas. E `pg_advisory_lock` de sessão sobre conexão pooled não é confiável | [ADR-0003](decisions.md) — **um regime só**: réplica única declarada, ou heartbeat por processo. Nunca os dois |
-| **A7** | **O backfill não é retomável e o container não trata SIGTERM** | Sem handler, sem `tini`, o Node vira PID 1 e o kernel **ignora** o sinal → todo redeploy termina em SIGKILL. E o sync sempre parte do offset 0. Um redeploy no meio de um backfill de horas **joga a carga inteira fora** | [ADR-0008](decisions.md) — cursor persistido, handler de SIGTERM com drenagem, `stop_grace_period` no serviço |
+| **A7** | **O backfill não é retomável e não há drenagem no encerramento** | O sync sempre parte do offset 0 e nada persiste onde parou. Um redeploy no meio de um backfill de horas **joga a carga inteira fora**. ⚠ **Parte deste achado estava errada** — ver abaixo | [ADR-0008](decisions.md) — cursor em `SyncState`, drenagem no encerramento, `stop_grace_period` no serviço |
 | **A8** | **"Fonte cruzada confirmada" não estava confirmada.** O plano B da regra 4 dependia de `sale.quantity` carregar horas fracionárias | A coleção tipa o campo como `integer` e como "quantidade de **itens**". O único `2.75` da coleção está numa venda que **não** é de reserva. É indício, não confirmação | Rebaixado para NÃO CONFIRMADO; virou medição da Fase 0 |
 | **A9** | **O caminho de desbloqueio da regra 10 pode não existir.** `extraFields` não aparece em nenhum exemplo de resposta de `/contracts` | Se a API não devolve o campo, preenchê-lo no Conexa **não destrava nada**, e a regra 10 fica sem saída | Virou teste de leitura da Fase 0, e pergunta à Conexa em vez de proposta ao cliente |
 | **A10** | **Mudar um threshold podia redisparar o histórico inteiro** — nunca foi definido | Se a chave de ciclo incluísse os parâmetros, qualquer ajuste abriria "ciclo novo" e as constraints **deixariam passar**. Se não incluísse, quem ficou de fora por limiar errado nunca mais entraria | [ADR-0009](decisions.md) — chave **imune aos parâmetros**; reavaliar é ação separada, explícita e auditada, com prévia de volume |
@@ -48,6 +48,24 @@ contra a coleção Postman · operação e deploy · risco de negócio) mais um 
 | **R12** | **Token morre** com a desativação do funcionário dono | 🟠 Alto | Usuário-**robô** dedicado; `401` desliga o canal e abre incidente — **falha ruidosa** |
 | **R13** | **Agendador silenciado para sempre** por registro de sync zumbi | 🔴 Crítico **e invisível** | Enterro de zumbis no boot + alerta se o último sync bem-sucedido tiver mais de 2h + rodapé "sincronizado há N" |
 | **R14** | **Migration do comercial toca o banco do financeiro** | 🔴 Crítico | Bancos fisicamente separados; role sem privilégio algum no database do financeiro. Uma migration destrutiva **não tem permissão para existir** |
+
+---
+
+## Achados que a verificação derrubou
+
+Auditoria também erra. Registrado aqui para ninguém corrigir o que não está quebrado:
+
+**A7, parte do SIGTERM — FALSO.** A auditoria afirmou que o container não trata SIGTERM (sem
+handler no código, sem `tini`, Node como PID 1) e que por isso todo redeploy terminaria em
+SIGKILL. **Medido na imagem real e refutado:** o servidor standalone do Next instala o handler por
+conta própria (`next/dist/server/lib/start-server.js` → `process.on('SIGTERM', cleanup)`), e o
+`exec` do entrypoint faz o Node recebê-lo como PID 1. `docker stop` sai com **código 0 em ~500 ms,
+com e sem `tini`** — testado nas duas variantes da mesma imagem.
+
+O que **sobra de verdadeiro** no achado: não há **drenagem de aplicação**. O Next fecha o servidor
+HTTP, mas não conhece o nosso agendador nem o backfill em voo. Somado ao backfill não-retomável
+(esse sim confirmado), um redeploy no meio de uma carga longa continua custando caro — só que a
+correção é cursor persistido + drenagem, não `tini`.
 
 ---
 

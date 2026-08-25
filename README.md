@@ -52,9 +52,85 @@ com o código**:
 | [perguntas-abertas.md](docs/context/perguntas-abertas.md) | O que precisa ser respondido, por quem e o que bloqueia |
 | [progress.md](docs/context/progress.md) | Log cronológico — atualizar a cada commit |
 
+## Desenvolvimento local
+
+Pré-requisitos: Node 20+, Docker.
+
+```bash
+npm install
+cp .env.example .env          # preencha SESSION_SECRET e ADMIN_EMAIL/ADMIN_PASSWORD
+docker compose up -d db       # Postgres na porta 5433 (5432 é do financeiro)
+npm run prisma:migrate
+npm run dev                   # http://localhost:3000
+```
+
+| Script | Ação |
+|---|---|
+| `npm run dev` | servidor de desenvolvimento |
+| `npm run build` | `prisma generate` + build de produção |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run test` | testes (Vitest) |
+| `npm run prisma:migrate` | cria/aplica migrations (dev) |
+| `npm run fase0` | **as provas de acesso da Fase 0** (ver abaixo) |
+
+## Fase 0 — provas de acesso
+
+Seis medições contra a API que decidem o escopo real do projeto. **Rodar antes da Fase 1.**
+
+```bash
+CONEXA_API_TOKEN=<token> npm run fase0
+```
+
+Somente leitura por construção: o método é fixo em `GET`, sem parâmetro de `method` nem `body`.
+Ritmo default de 15 req/min e disjuntor em 80 requisições, para não competir com o dashboard
+financeiro pelo teto compartilhado. Gera `docs/context/fase-0-resultado.md` (ignorado pelo git —
+pode conter dado de cliente real).
+
+## Deploy
+
+### Publicação da imagem — automática
+
+`.github/workflows/docker-publish.yml` builda e publica no GHCR **a cada push na `main`** (e sob
+demanda via "Run workflow"). Não é preciso rodar `docker build` à mão — só dar push.
+
+Publica sempre **duas tags**: `ghcr.io/basilio-byte/dashboard-comercial:latest` e
+`:sha-<short-sha>`. Nunca só `latest` — sem a tag de sha não há como saber qual commit está
+rodando em produção.
+
+> O nome da imagem sai de `github.repository`, então o namespace acompanha o dono do repositório
+> sozinho. Não há nome hard-coded para errar.
+
+### Easypanel
+
+1. Serviço **Postgres** próprio (não compartilhar com o financeiro — ver
+   [ADR-0001](docs/context/decisions.md)).
+2. Serviço **App** do tipo **Docker Image** → `ghcr.io/basilio-byte/dashboard-comercial:latest`.
+   Se o pacote estiver privado, cadastrar usuário GitHub + PAT com `read:packages`.
+3. **ENV** (todas as variáveis, incluindo segredos, vivem aqui — ver [`.env.example`](.env.example)):
+   `DATABASE_URL`, `SESSION_SECRET` (`openssl rand -base64 48`), `APP_URL`,
+   `APP_TIMEZONE=America/Fortaleza`, `CONEXA_API_TOKEN`, `CRON_SECRET`,
+   `ADMIN_EMAIL`/`ADMIN_PASSWORD` (só no primeiro boot — pode remover depois).
+4. Porta `3000`. Healthcheck: `GET /api/health`.
+5. **Réplica única** — `SYNC_SCHEDULER=off` obrigatório em qualquer réplica extra
+   ([ADR-0003](docs/context/decisions.md)).
+6. `stop_grace_period` folgado, para a aplicação drenar o que estiver em voo.
+
+**Nada é manual no primeiro deploy.** O `docker-entrypoint.sh` aplica as migrations
+(`prisma migrate deploy`) e cria o primeiro admin (idempotente, nunca sobrescreve senha).
+
+O healthcheck confirma, de fora, que o deploy subiu com o disparo fechado:
+
+```json
+{"status":"ok","db":"ok","env":"ok","timezone":"America/Fortaleza",
+ "conexa":"sem token","notificador":"off","modo":"dry-run"}
+```
+
 ## Estado atual
 
-**Fase de planejamento.** Nenhum código escrito ainda. O próximo passo é a **Fase 0** do
+**Esqueleto no ar, verificado ponta a ponta:** imagem Docker builda, migrations aplicam no boot,
+admin é criado de forma idempotente, healthcheck responde 200 e o `docker stop` encerra limpo.
+
+**Nenhuma regra de negócio implementada.** O próximo passo é a **Fase 0** do
 [roadmap](docs/context/roadmap.md) — as provas de acesso que decidem o escopo real do projeto.
 
 ## Regra permanente

@@ -283,15 +283,27 @@ short-sha; healthcheck em `/api/health`.
 **Não copiar:** modelos de despesa/fornecedor/meio de recebimento, DRE, export XLSX (o comercial
 não vive de exportar — CSV basta), e a lógica de data de crédito.
 
-**Corrigir ao copiar** — três defeitos que a auditoria encontrou no que parecia pronto:
-1. o backfill **não é retomável** (sempre parte do offset 0, sem cursor persistido);
-2. o container **não trata SIGTERM** (sem handler, sem `tini`; o Node vira PID 1 e o kernel ignora
-   o sinal) — logo todo redeploy do Easypanel termina em SIGKILL, e um redeploy no meio de um
-   backfill de horas joga a carga inteira fora;
-3. o agendador ancora a fase no boot, não no relógio de parede.
+**Corrigir ao copiar** — defeitos encontrados pela auditoria no que parecia pronto:
 
-**Consequência.** Quem mantém um mantém o outro. E as três correções acima entram **antes** do
-primeiro backfill longo, não depois de perdê-lo.
+1. o backfill **não é retomável** (sempre parte do offset 0, sem cursor persistido) — resolvido
+   pelo model `SyncState`, que guarda o cursor por entidade/janela;
+2. o agendador ancora a fase no **boot**, não no relógio de parede — logo "rodar em janelas
+   desencontradas do financeiro" não é implementável sem horário explícito (ver ADR-0002);
+3. **não há drenagem no encerramento**: nada para o agendador, grava o cursor em voo ou termina um
+   despacho já postado antes do processo sair.
+
+⚠ **Correção de um erro meu, medido nesta imagem.** Eu havia escrito que o container "não trata
+SIGTERM" e que todo redeploy terminaria em SIGKILL. **Está errado.** O servidor standalone do Next
+instala o handler por conta própria (`next/dist/server/lib/start-server.js` →
+`process.on('SIGTERM', cleanup)`), e o `exec` do entrypoint faz o Node receber o sinal como PID 1.
+Medição: `docker stop` sai com **código 0 em ~500 ms, com e sem `tini`**. O `tini` foi mantido pelo
+que ele de fato entrega — encaminhar sinais e colher zumbis — não pela razão que eu havia dado.
+
+O problema **real** é o item 3: o Next fecha o servidor HTTP, mas não sabe nada do nosso agendador
+nem do backfill em voo. Drenar é código de aplicação.
+
+**Consequência.** Quem mantém um mantém o outro. E as correções entram **antes** do primeiro
+backfill longo, não depois de perdê-lo.
 
 ---
 

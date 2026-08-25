@@ -4,6 +4,46 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-25 — Esqueleto e cadeia de deploy, verificados
+
+**Feito.** Projeto Next.js 15 + Prisma + Tailwind, `Dockerfile` multi-stage, `docker-entrypoint.sh`,
+`docker-compose.yml`, `.env.example` e o workflow de publicação no GHCR.
+
+**Verificado de ponta a ponta, não presumido:**
+
+- `npm run typecheck` e `npm run build` passam; `/api/health` sai como rota dinâmica;
+- imagem Docker builda;
+- subindo com Postgres real: migrations aplicam no boot, admin é criado, app sobe;
+- **idempotência**: no restart, "No pending migrations" e "usuário já existe — senha preservada";
+- `GET /api/health` → `200 {"status":"ok","db":"ok","env":"ok","timezone":"America/Fortaleza",
+  "conexa":"sem token","notificador":"off","modo":"dry-run"}` — o healthcheck confirma **de fora**
+  que o deploy subiu com o disparo fechado;
+- `docker stop` → código 0 em ~500 ms.
+
+**Correção de rota — a fonte do deploy.** O que roda em produção é o `skill-financeiro`, sob a
+conta `basilio-byte`, com imagem `ghcr.io/basilio-byte/skill-financeiro:latest` publicada
+**automaticamente** por GitHub Actions. O README do `seahub_financeiro` (que eu havia usado como
+referência) fala em `ghcr.io/basiliolp/` e publicação manual por cota esgotada — está
+desatualizado. O workflow do comercial usa `IMAGE_NAME: ${{ github.repository }}`, então o
+namespace sai certo sozinho.
+
+**Correção de rota — segredos.** Sem 1Password. O documento de especificação manda usá-lo, mas
+isso era artefato do ambiente OpenClaw onde o protótipo rodou. Segredos vivem nas **ENV do
+Easypanel**; localmente, num `.env` coberto pelo `.gitignore`.
+
+**Um achado de auditoria caiu na verificação.** A auditoria afirmava que o container não trata
+SIGTERM e que todo redeploy terminaria em SIGKILL. **Falso, medido nas duas variantes da mesma
+imagem:** o standalone do Next instala o handler sozinho
+(`next/dist/server/lib/start-server.js` → `process.on('SIGTERM', cleanup)`), e `docker stop` sai
+com código 0 em ~500 ms **com e sem `tini`**. O que sobra de verdadeiro é a falta de **drenagem de
+aplicação** — o Next fecha o HTTP, mas não conhece o agendador nem o backfill em voo. Corrigido em
+`decisions.md` (ADR-0008), `riscos.md` e no comentário do `Dockerfile`. O `tini` ficou, pelo que
+de fato entrega.
+
+**Próximo passo.** Rodar a Fase 0 com o token real.
+
+---
+
 ## 2026-08-25 — Planejamento
 
 Repositório clonado vazio. Nenhum código de aplicação escrito ainda.
