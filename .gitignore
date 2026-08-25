@@ -1,0 +1,45 @@
+# Dependências
+node_modules/
+.pnp
+.pnp.js
+
+# Build
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Ambiente — NUNCA commitar credenciais.
+# Segredos vivem no 1Password; em produção, nos Secrets do Easypanel.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Resultados das provas da Fase 0 (podem conter dados reais de clientes)
+docs/context/fase-0-resultado.md
+scripts/.saida/
+
+# Testes e cobertura
+coverage/
+.vitest/
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# Editores e SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
