@@ -16,7 +16,7 @@ export default async function Panorama() {
   const mesFechado = ultimoMesFechado(agora);
   const doze = ultimosMesesFechados(12, agora);
 
-  const [perfis, mensaisMes, ultimoSync, espelho] = await Promise.all([
+  const [perfis, mensaisMes, ultimoSync, espelho, agregado] = await Promise.all([
     prisma.customerProfile.findMany({
       where: { receitaAnoCorrente: { gt: 0 } },
       select: { customerConexaId: true, receitaAnoCorrente: true, customer: { select: { name: true } } },
@@ -33,6 +33,15 @@ export default async function Panorama() {
       select: { finishedAt: true, mode: true },
     }),
     estadoDoEspelho(),
+    // ⚠ O total vem de agregação SEM CORTE. A versão anterior somava `perfis`,
+    // que é `take: 200` — o card dizia "Receita {ano}" mostrando a soma dos 200
+    // maiores, com ~5.500 clientes na base. Errava sempre, no número mais
+    // visível da tela, e o erro cresce com a base.
+    prisma.customerProfile.aggregate({
+      where: { receitaAnoCorrente: { gt: 0 } },
+      _sum: { receitaAnoCorrente: true },
+      _count: true,
+    }),
   ]);
 
   const semDados = perfis.length === 0 && mensaisMes.length === 0;
@@ -45,7 +54,8 @@ export default async function Panorama() {
     })),
     5,
   );
-  const totalAno = roundMoney(sum(perfis.map((p) => p.receitaAnoCorrente.toString())));
+  const totalAno = money(agregado._sum.receitaAnoCorrente?.toString() ?? 0);
+  const clientesComReceita = agregado._count;
   const totalMes = roundMoney(sum(mensaisMes.map((m) => m.receita.toString())));
 
   // "Em queda" só considera quem TEM base de comparação. variacaoPct nulo =
@@ -85,7 +95,7 @@ export default async function Panorama() {
         <Cartao
           titulo={`Receita ${anoCorrente}`}
           valor={formatBRL(totalAno)}
-          nota={`${perfis.length} clientes com receita`}
+          nota={`${clientesComReceita} clientes com receita`}
           confiavel={espelho.receitaConfiavel}
         />
         <Cartao

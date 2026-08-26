@@ -83,6 +83,11 @@ USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# Fuso do PROCESSO fixado em UTC. A aritmética de ciclo converte explicitamente
+# para America/Fortaleza; deixar o processo num fuso deslocado fazia a conta sair
+# errada entre 21h e meia-noite. O Alpine cai em UTC por padrão — isto torna a
+# premissa explícita em vez de sorte.
+ENV TZ=UTC
 
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/sbin/tini", "--", "./docker-entrypoint.sh"]

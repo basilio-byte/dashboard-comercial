@@ -33,7 +33,7 @@ import type { ConexaCharge } from "@/lib/conexa/types";
 
 export interface Divergencia {
   chargeId: number;
-  motivo: "faltando no espelho" | "sobrando no espelho" | "valor diferente";
+  motivo: "faltando no espelho" | "sobrando no espelho" | "valor diferente" | "status diferente";
   local?: string;
   remoto?: string;
 }
@@ -74,7 +74,7 @@ export async function reconciliarMes(
   const localReconhecidas = locais.filter((c) => contaComoReceita(c as never));
   const localTotal = roundMoney(sum(localReconhecidas.map((c) => valorFaturado(c as never).toString())));
 
-  const remotos = new Map<number, { valor: Money; conta: boolean }>();
+  const remotos = new Map<number, { valor: Money; conta: boolean; status: string | null }>();
   let requisicoes = 0;
 
   for await (const { itens } of paginatePages<ConexaCharge>(
@@ -90,6 +90,7 @@ export async function reconciliarMes(
       remotos.set(m.conexaId, {
         valor: valorFaturado(m as never),
         conta: contaComoReceita(m as never),
+        status: m.status ?? null,
       });
     }
   }
@@ -98,6 +99,7 @@ export async function reconciliarMes(
   const remotoTotal = roundMoney(sum(remotoReconhecidas.map((r) => r.valor.toString())));
 
   const divergencias: Divergencia[] = [];
+  // ⚠ contadas ANTES do slice(0, 50) do retorno — senão 51 divergências viravam 50.
   for (const [id, r] of remotos) {
     const l = localPorId.get(id);
     if (!l) {
@@ -107,6 +109,19 @@ export async function reconciliarMes(
     const vl = valorFaturado(l as never);
     if (!vl.equals(r.valor)) {
       divergencias.push({ chargeId: id, motivo: "valor diferente", local: vl.toFixed(2), remoto: r.valor.toFixed(2) });
+    }
+    // ⚠ Divergência de STATUS era invisível: só o valor era comparado. É a
+    // divergência que o sync MAIS produz, porque o upsert atualiza o registro
+    // mas o status local envelhece entre varreduras. Uma cobrança cancelada no
+    // Conexa depois do último sync continuava contando como receita aqui, com o
+    // mesmo valor dos dois lados — então nada aparecia na lista.
+    if (contaComoReceita(l as never) !== r.conta) {
+      divergencias.push({
+        chargeId: id,
+        motivo: "status diferente",
+        local: `${l.status ?? "?"} (${contaComoReceita(l as never) ? "conta" : "não conta"})`,
+        remoto: `${r.status ?? "?"} (${r.conta ? "conta" : "não conta"})`,
+      });
     }
   }
   for (const c of locais) {
@@ -132,10 +147,23 @@ export async function reconciliarMes(
       locais.length > 0
         ? `O Conexa devolveu ZERO cobranças com vencimento em ${mesKey}, mas o espelho tem ${locais.length}. Isso é divergência ou falha de consulta — não é "bate".`
         : `O Conexa devolveu zero cobranças e o espelho também. Nada foi conferido: não confunda com "bate".`;
-  } else if (diferenca.isZero() && localReconhecidas.length === remotoReconhecidas.length) {
+  } else if (
+    diferenca.isZero() &&
+    localReconhecidas.length === remotoReconhecidas.length &&
+    // ⚠ E a lista de divergências VAZIA. Sem esta terceira condição, duas
+    // diferenças de sinal oposto se anulam, os totais e as contagens empatam, e
+    // o painel pintava a faixa verde "✓ bate" COM a lista de divergências
+    // renderizada logo abaixo, no mesmo bloco.
+    divergencias.length === 0
+  ) {
     veredicto = "BATE";
   } else {
     veredicto = "DIVERGE";
+    if (diferenca.isZero() && divergencias.length > 0) {
+      observacao =
+        `Os totais empatam (R$ 0,00 de diferença) mas há ${divergencias.length} divergência(s) ` +
+        `individuais que se cancelam. Espelho e Conexa NÃO estão iguais.`;
+    }
   }
 
   return {

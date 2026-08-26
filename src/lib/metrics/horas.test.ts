@@ -177,6 +177,71 @@ describe("consolidação do ciclo", () => {
   });
 });
 
+describe("bugs que a auditoria adversarial encontrou", () => {
+  const ciclo = { inicio: d("2026-08-26"), fimExclusivo: d("2026-09-26"), rotulo: "x" };
+  const r = (o: Partial<ReservaParaConsumo>): ReservaParaConsumo => ({
+    status: "deductedFromQuota",
+    isActive: true,
+    horas: 1,
+    dataLocal: d("2026-09-01"),
+    ...o,
+  });
+
+  it("reserva paga com a cota INTACTA não é estouro", () => {
+    // O bug: cliente Abissal (8h) usa 2h da cota e 1h de auditório pago (sala
+    // fora do grupo da cota). A versão antiga marcava "estoura a cota" com 6h
+    // de saldo na linha ao lado — 25% de uso.
+    const c = consolidarCiclo(ciclo, [r({ horas: 2 }), r({ status: "paid", horas: 1 })], money(8));
+    expect(c.abatido.toFixed(2)).toBe("2.00");
+    expect(c.faturado.toFixed(2)).toBe("1.00");
+    expect(c.saldo!.toFixed(2)).toBe("6.00");
+    expect(c.estourou).toBe(false);
+  });
+
+  it("estouro exige a cota ESGOTADA", () => {
+    const c = consolidarCiclo(ciclo, [r({ horas: 5 }), r({ status: "paid", horas: 2 })], money(5));
+    expect(c.estourou).toBe(true);
+  });
+
+  it("duração ausente vira LACUNA, não zero — e o ciclo fica não-conclusivo", () => {
+    // Reserva de 6h com finalTime nulo aparecia como "0h, saldo cheio".
+    const c = consolidarCiclo(ciclo, [r({ horas: null })], money(5));
+    expect(c.abatido.toFixed(2)).toBe("0.00");
+    expect(c.conclusivo).toBe(false);
+    expect(c.reservas).toBe(1);
+  });
+
+  it("status desconhecido (partiallyPaid) não evapora", () => {
+    // Está no enum documentado da API e sumia de todos os baldes.
+    const c = consolidarCiclo(ciclo, [r({ status: "partiallyPaid", horas: 3 })], money(5));
+    expect(c.horasDesconhecidas.toFixed(2)).toBe("3.00");
+    expect(c.conclusivo).toBe(false);
+  });
+
+  it("cancelada é descarte legítimo — o ciclo continua conclusivo", () => {
+    const c = consolidarCiclo(ciclo, [r({ status: "cancelled", horas: 3 }), r({ horas: 1 })], money(5));
+    expect(c.reservasDescartadas).toBe(1);
+    expect(c.conclusivo).toBe(true);
+    expect(c.abatido.toFixed(2)).toBe("1.00");
+  });
+
+  it("ciclo não-conclusivo NÃO vota no sinal de excedente", () => {
+    const bom = consolidarCiclo(ciclo, [r({ horas: 5 }), r({ status: "paid", horas: 2 })], money(5));
+    const furado = consolidarCiclo(ciclo, [r({ status: "partiallyPaid", horas: 9 })], money(5));
+    const s = avaliarExcedente([bom, furado, furado], { minCiclosComEstouro: 2 });
+    expect(s.ciclosConclusivos).toBe(1);
+    expect(s.ciclosComEstouro).toBe(1);
+    expect(s.recorrente).toBe(false); // 1 estouro conclusivo não faz recorrência
+  });
+
+  it("cota ZERO não é cota — não gera estouro", () => {
+    // quantity nulo virava Decimal(0), passava no `!= null` e marcava a base
+    // inteira do plano como estourando.
+    const c = consolidarCiclo(ciclo, [r({ status: "paid", horas: 2 })], money(0));
+    expect(c.estourou).toBe(false);
+  });
+});
+
 describe("sinal de excedente recorrente", () => {
   const c = (faturado: number, concedido: number | null, abatido = concedido ?? 0) => ({
     ciclo: { inicio: d("2026-01-01"), fimExclusivo: d("2026-02-01"), rotulo: "x" },
@@ -184,28 +249,33 @@ describe("sinal de excedente recorrente", () => {
     abatido: money(abatido),
     faturado: money(faturado),
     naoFaturado: money(0),
+    horasDesconhecidas: money(0),
+    reservasDescartadas: 0,
     consumido: money(abatido + faturado),
     saldo: concedido === null ? null : money(concedido - abatido),
-    estourou: concedido !== null && faturado > 0,
+    // cota esgotada E faturado por cima — a regra corrigida
+    estourou: concedido !== null && concedido > 0 && abatido >= concedido && faturado > 0,
+    conclusivo: true,
     reservas: 1,
   });
 
   it("dispara com estouro em 2 dos 3 ciclos", () => {
-    const s = avaliarExcedente([c(0, 5, 3), c(2, 5), c(1.5, 5)]);
+    // c(faturado, concedido, abatido): estouro exige abatido >= concedido
+    const s = avaliarExcedente([c(0, 5, 3), c(2, 5, 5), c(1.5, 5, 5)]);
     expect(s.ciclosComEstouro).toBe(2);
     expect(s.horasExcedentes.toFixed(2)).toBe("3.50");
     expect(s.recorrente).toBe(true);
   });
 
   it("um estouro isolado NÃO é recorrente — pode ter sido um evento", () => {
-    const s = avaliarExcedente([c(0, 5, 2), c(4, 5), c(0, 5, 1)]);
+    const s = avaliarExcedente([c(0, 5, 2), c(4, 5, 5), c(0, 5, 1)]);
     expect(s.ciclosComEstouro).toBe(1);
     expect(s.recorrente).toBe(false);
   });
 
   it("limiar de ciclos é configurável", () => {
-    expect(avaliarExcedente([c(1, 5)], { minCiclosComEstouro: 1 }).recorrente).toBe(true);
-    expect(avaliarExcedente([c(1, 5)], { minCiclosComEstouro: 3 }).recorrente).toBe(false);
+    expect(avaliarExcedente([c(1, 5, 5)], { minCiclosComEstouro: 1 }).recorrente).toBe(true);
+    expect(avaliarExcedente([c(1, 5, 5)], { minCiclosComEstouro: 3 }).recorrente).toBe(false);
   });
 
   it("uso médio ignora ciclos sem cota, em vez de dividir por zero", () => {

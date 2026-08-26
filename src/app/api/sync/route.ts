@@ -26,7 +26,11 @@ export async function POST(req: NextRequest) {
   }
 
   const params = new URL(req.url).searchParams;
-  const modo = params.get("mode") ?? "reconcile";
+  // ⚠ O default era "reconcile", que NÃO tem case no switch — `POST /api/sync`
+  // sem query string, que é o uso óbvio de um cron, devolvia 400 e não
+  // sincronizava nada. A sincronização incremental ainda não existe (ver
+  // roadmap); até existir, o default útil é atualizar os cadastros.
+  const modo = params.get("mode") ?? "dimensions";
   // `entity=bookings,contracts` restringe a carga — permite priorizar quando o
   // ritmo é conservador e a fila inteira levaria horas.
   const entidades = params.get("entity")?.split(",").map((s) => s.trim()).filter(Boolean);

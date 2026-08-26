@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { nowInAppTz } from "@/lib/dates";
+import { keyToUtcDate, nowInAppTz, todayKey } from "@/lib/dates";
+import { estadoDoEspelho } from "./completude";
 import { money, type Money } from "@/lib/money";
 import {
   avaliarExcedente,
@@ -37,11 +38,26 @@ export async function horasDoCliente(
   customerConexaId: number,
   ref: Date = nowInAppTz(),
 ): Promise<HorasDoCliente> {
-  // O contrato que ancora o ciclo: o ativo mais antigo com plano. Se houver
-  // mais de um, o mais antigo é o que define o aniversário do pacote — os
-  // demais entram na cota somada, não na âncora.
+  // ⚠ NORMALIZA para data-calendário em meia-noite UTC.
+  //
+  // `cicloVigente` lê `getUTCDate()/getUTCMonth()`, mas `nowInAppTz()` é um
+  // valor que a convenção do projeto lê com getters LOCAIS. Num processo com
+  // TZ=UTC-3, o instante 2026-09-26T00:30Z (= 25/09 21h30 em Fortaleza) tem
+  // `getUTCDate() === 26`: o ciclo virava 3h antes da hora, todo dia entre 21h
+  // e meia-noite. Em produção o Alpine cai em UTC e acertava por sorte; na
+  // máquina de desenvolvimento já estava errado.
+  const refDia = keyToUtcDate(todayKey());
+
   const contratos = await prisma.contract.findMany({
-    where: { customerConexaId, isActive: true, planConexaId: { not: null } },
+    where: {
+      customerConexaId,
+      isActive: true,
+      planConexaId: { not: null },
+      // `isActive` vem espelhado do ERP e herda o atraso do operador em baixar
+      // a flag. `endDate` é o fato — contrato encerrado não ancora ciclo nem
+      // contribui cota.
+      OR: [{ endDate: null }, { endDate: { gte: refDia } }],
+    },
     orderBy: { startDate: "asc" },
   });
 
@@ -57,11 +73,19 @@ export async function horasDoCliente(
     };
   }
 
-  const ancora = contratos[0]!;
   const planos = await prisma.plan.findMany({
     where: { conexaId: { in: contratos.map((c) => c.planConexaId!).filter(Boolean) } },
   });
   const planoPorId = new Map(planos.map((p) => [p.conexaId, p]));
+
+  // A âncora tem de ser um contrato que TEM cota. O filtro anterior era só
+  // "tem plano", então um Endereço Fiscal Litoral antigo (cota nula) ancorava
+  // o ciclo de uma cota que pertence a outro contrato, posterior.
+  const comCota = contratos.filter((c) => {
+    const p = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
+    return p?.horasInclusasMes != null;
+  });
+  const ancora = comCota[0] ?? contratos[0]!;
 
   // Cota somada dos contratos ativos. `null` quando NENHUM plano tem cota —
   // e isso é diferente de zero: é o desenho do Litoral.
@@ -86,8 +110,8 @@ export async function horasDoCliente(
     };
   }
 
-  const vigente = cicloVigente(inicio, ref);
-  const fechadosCiclos = ciclosFechados(inicio, ref, CICLOS_ANALISADOS);
+  const vigente = cicloVigente(inicio, refDia);
+  const fechadosCiclos = ciclosFechados(inicio, refDia, CICLOS_ANALISADOS);
   const janelas = [...fechadosCiclos, ...(vigente ? [vigente] : [])];
   if (!janelas.length) {
     return {
@@ -150,32 +174,65 @@ export async function horasDoCliente(
  * ciclos não se alinham. Custa uma consulta por cliente com contrato ativo —
  * aceitável porque roda no job, não no request.
  */
+export interface FilaExcedente {
+  itens: Array<{ customerConexaId: number; nome: string | null; horas: HorasDoCliente }>;
+  /** true = o corte foi atingido e a fila está incompleta. */
+  truncado: boolean;
+  analisados: number;
+}
+
 export async function clientesComExcedente(
   ref: Date = nowInAppTz(),
   opts: { limite?: number } = {},
-): Promise<Array<{ customerConexaId: number; nome: string | null; horas: HorasDoCliente }>> {
+): Promise<FilaExcedente> {
+  // ⚠ GATE. Esta função é a porta de entrada da fila que vira task no ClickUp,
+  // e era a única do caminho sem selo de completude — a proteção existia só
+  // onde um humano olha. Devolver lista vazia seria pior: vazio é
+  // indistinguível de "ninguém estourou".
+  const espelho = await estadoDoEspelho();
+  if (!espelho.horasConfiavel) {
+    throw new Error(
+      `Espelho incompleto (${espelho.incompletas.join(", ")}) — a fila de excedente não pode ser ` +
+        `calculada sem risco de apontar o cliente errado.`,
+    );
+  }
+
+  const limite = opts.limite ?? 500;
   const comCota = await prisma.contract.findMany({
-    where: { isActive: true, planConexaId: { not: null }, customerConexaId: { not: null } },
+    where: {
+      isActive: true,
+      planConexaId: { not: null },
+      customerConexaId: { not: null },
+      // Gate de elegibilidade no WHERE, e não depois de 4 idas ao banco por cliente.
+      customer: { isActive: true, isBlocked: false },
+    },
     select: { customerConexaId: true },
     distinct: ["customerConexaId"],
-    take: opts.limite ?? 500,
+    // Sem `orderBy` o Postgres não garante QUAIS 500 — a fila do vendedor
+    // mudaria entre execuções sem nada ter mudado no negócio.
+    orderBy: { customerConexaId: "asc" },
+    take: limite + 1,
   });
+  const truncado = comCota.length > limite;
+  const alvos = comCota.slice(0, limite);
 
   const saida: Array<{ customerConexaId: number; nome: string | null; horas: HorasDoCliente }> = [];
-  for (const { customerConexaId } of comCota) {
+  for (const { customerConexaId } of alvos) {
     if (customerConexaId === null) continue;
     const horas = await horasDoCliente(customerConexaId, ref);
     if (!horas.sinal?.recorrente) continue;
     const cliente = await prisma.customer.findUnique({
       where: { conexaId: customerConexaId },
-      select: { name: true, isActive: true, isBlocked: true },
+      select: { name: true },
     });
-    // Gate de elegibilidade (ADR-0010): inativo ou bloqueado nunca vira sinal.
-    if (!cliente || !cliente.isActive || cliente.isBlocked) continue;
-    saida.push({ customerConexaId, nome: cliente.name, horas });
+    saida.push({ customerConexaId, nome: cliente?.name ?? null, horas });
   }
 
-  return saida.sort((a, b) =>
-    Number(b.horas.sinal!.horasExcedentes.minus(a.horas.sinal!.horasExcedentes)),
-  );
+  return {
+    itens: saida.sort((a, b) =>
+      Number(b.horas.sinal!.horasExcedentes.minus(a.horas.sinal!.horasExcedentes)),
+    ),
+    truncado,
+    analisados: alvos.length,
+  };
 }

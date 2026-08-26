@@ -151,6 +151,9 @@ export function faturada(r: ReservaParaConsumo): boolean {
   return r.status === "billed" || r.status === "paid";
 }
 
+/** Status DOCUMENTADOS de reserva, conforme a coleção Postman da API v2. */
+const STATUS_DESCARTE = new Set(["cancelled", "billedCancelled"]);
+
 /**
  * Reserva que aconteceu mas **não foi faturada nem abatida** (`notBilled`).
  *
@@ -171,23 +174,32 @@ export interface ConsumoDoCiclo {
   concedido: Money | null;
   /** Horas abatidas da cota. */
   abatido: Money;
-  /** Horas faturadas à parte — o excedente, quando há cota. */
+  /** Horas faturadas à parte. */
   faturado: Money;
-  /**
-   * Horas de reservas `notBilled` — nem abatidas, nem faturadas. Ambíguas
-   * (cobrança pendente ou cortesia), então ficam FORA de `consumido` e são
-   * exibidas à parte.
-   */
+  /** Horas de reservas `notBilled` — ambíguas, fora do consumo. */
   naoFaturado: Money;
-  /** Total consumido no ciclo (abatido + faturado). Não inclui o ambíguo. */
-  consumido: Money;
   /**
-   * Saldo restante. `null` quando não há cota — sem cota não existe saldo, e
-   * mostrar zero sugeriria "acabou", que é outra coisa.
+   * Horas que existem mas não sabemos classificar: duração ausente, ou status
+   * fora dos que a API documenta.
+   *
+   * Sem este balde, elas viravam ZERO silencioso — uma reserva de 6h com
+   * `finalTime` nulo aparecia como "0h consumidas, saldo cheio", que é dado
+   * inventado com cara de fato.
    */
+  horasDesconhecidas: Money;
+  /** Reservas descartadas legitimamente (canceladas). */
+  reservasDescartadas: number;
+  /** Total consumido (abatido + faturado). Não inclui ambíguo nem desconhecido. */
+  consumido: Money;
+  /** Saldo restante. `null` sem cota — e sem cota não existe saldo. */
   saldo: Money | null;
-  /** Estourou a cota neste ciclo? */
+  /** Estourou a cota? Ver a regra abaixo — exige a cota ESGOTADA. */
   estourou: boolean;
+  /**
+   * O ciclo tem buraco: alguma reserva não pôde ser classificada. Ciclo não
+   * conclusivo **não produz sinal** — ver `avaliarExcedente`.
+   */
+  conclusivo: boolean;
   reservas: number;
 }
 
@@ -197,7 +209,7 @@ export interface ConsumoDoCiclo {
  * ⚠ O excedente NÃO é `consumido − concedido` calculado por nós: é o que o
  * Conexa efetivamente faturou. Ele já aplicou a regra ("abate o que dá, cobra o
  * resto"), e recalcular por fora inventaria um número que pode divergir do que
- * o cliente pagou. Somamos o que o ERP decidiu, não o que achamos que deveria.
+ * o cliente pagou.
  */
 export function consolidarCiclo(
   ciclo: Ciclo,
@@ -211,15 +223,41 @@ export function consolidarCiclo(
   let abatido = money(0);
   let faturado = money(0);
   let naoFaturado = money(0);
+  let horasDesconhecidas = money(0);
+  let reservasDescartadas = 0;
+  let temBuraco = false;
+
   for (const r of doCiclo) {
-    const h = money(r.horas ?? 0);
+    const cancelada = r.isActive === false || Boolean(r.cancellationReason);
+    if (cancelada || STATUS_DESCARTE.has(r.status ?? "")) {
+      reservasDescartadas++;
+      continue;
+    }
+
+    // Duração ausente é LACUNA, não zero. `duracaoEmHoras` devolve null de
+    // propósito quando falta uma das pontas.
+    if (r.horas === null || r.horas === undefined) {
+      temBuraco = true;
+      continue;
+    }
+    const h = money(r.horas);
+
     if (abatidaDaCota(r)) abatido = abatido.plus(h);
     else if (faturada(r)) faturado = faturado.plus(h);
     else if (naoFaturada(r)) naoFaturado = naoFaturado.plus(h);
+    else {
+      // Status fora dos documentados — `partiallyPaid` é consumo REAL que
+      // evaporava aqui. Sem este ramo, ele sumia de todos os baldes e ainda
+      // contava em `reservas`, deixando a linha internamente contraditória.
+      horasDesconhecidas = horasDesconhecidas.plus(h);
+      temBuraco = true;
+    }
   }
 
   const consumido = abatido.plus(faturado);
+  const temCota = concedido !== null && !concedido.isZero();
   const saldo = concedido === null ? null : concedido.minus(abatido);
+  const conclusivo = !temBuraco && horasDesconhecidas.isZero();
 
   return {
     ciclo,
@@ -227,11 +265,26 @@ export function consolidarCiclo(
     abatido,
     faturado,
     naoFaturado,
+    horasDesconhecidas,
+    reservasDescartadas,
     consumido,
     saldo,
-    // Estourar exige ter cota E ter horas faturadas por cima dela. Sem cota,
-    // toda reserva é faturada e isso não é "estouro" — é o modelo do plano.
-    estourou: concedido !== null && faturado.greaterThan(0),
+    /**
+     * ⚠ Estourar exige a cota ESGOTADA, não só "existe reserva faturada".
+     *
+     * A versão anterior era `faturado > 0`, e isso reintroduzia justamente o
+     * problema que o código declara não resolver: 100% das cotas da Seahub são
+     * por GRUPO de salas, e a API não expõe quem está no grupo. Uma reserva
+     * paga de sala FORA do grupo é indistinguível de excedente.
+     *
+     * Efeito medido do bug: cliente Abissal (8h) com 2h abatidas + 1h de
+     * auditório pago era marcado "estoura a cota com recorrência" — usando 25%
+     * da cota, com saldo de 6h exibido na linha ao lado.
+     *
+     * Conservador na direção certa: sem a cota esgotada, não houve estouro.
+     */
+    estourou: temCota && abatido.greaterThanOrEqualTo(concedido!) && faturado.greaterThan(0),
+    conclusivo,
     reservas: doCiclo.length,
   };
 }
@@ -243,6 +296,8 @@ export function consolidarCiclo(
 export interface SinalExcedente {
   /** Ciclos analisados (fechados, do mais antigo ao mais novo). */
   ciclos: ConsumoDoCiclo[];
+  /** Quantos ciclos puderam ser classificados por completo. */
+  ciclosConclusivos: number;
   /** Em quantos deles o cliente estourou a cota. */
   ciclosComEstouro: number;
   /** Horas faturadas por cima da cota, somadas. */
@@ -267,10 +322,13 @@ export function avaliarExcedente(
   opts: { minCiclosComEstouro?: number } = {},
 ): SinalExcedente {
   const minCiclos = opts.minCiclosComEstouro ?? 2;
-  const comEstouro = ciclos.filter((c) => c.estourou);
+  // Ciclo com buraco não vota: um ciclo em que não sabemos classificar todas as
+  // reservas não pode confirmar NEM negar estouro.
+  const conclusivos = ciclos.filter((c) => c.conclusivo);
+  const comEstouro = conclusivos.filter((c) => c.estourou);
   const horasExcedentes = comEstouro.reduce((acc, c) => acc.plus(c.faturado), money(0));
 
-  const comCota = ciclos.filter((c) => c.concedido !== null && !c.concedido.isZero());
+  const comCota = conclusivos.filter((c) => c.concedido !== null && !c.concedido.isZero());
   const usoMedioPct = comCota.length
     ? Number(
         comCota
@@ -282,6 +340,7 @@ export function avaliarExcedente(
 
   return {
     ciclos,
+    ciclosConclusivos: conclusivos.length,
     ciclosComEstouro: comEstouro.length,
     horasExcedentes,
     usoMedioPct,

@@ -113,6 +113,15 @@ export async function consolidarReceitaMensal(
     }
   }
 
+  // ⚠ APAGA a janela antes de regravar.
+  //
+  // Sem isto a consolidação é MONOTÔNICA: só escreve para clientes presentes em
+  // `acumulado`, e quem sai (porque a única cobrança do mês foi cancelada) fica
+  // com a linha antiga para sempre. O cliente seguia no Top 5 e no total do ano
+  // com receita que não existe mais — e a reconciliação NÃO pega, porque ela
+  // confere espelho × Conexa e o espelho está certo; errado é o derivado.
+  await prisma.customerMonthlyRevenue.deleteMany({ where: { mesKey: { in: meses } } });
+
   // Em lotes: uma transação com dezenas de milhares de upserts estoura o tempo.
   for (let i = 0; i < ops.length; i += 500) {
     await prisma.$transaction(ops.slice(i, i + 500));
@@ -137,7 +146,11 @@ export async function consolidarPerfis(
     select: { conexaId: true },
   });
 
+  // Restrita à janela: ler a tabela inteira traria meses fora do horizonte e
+  // somaria receita de períodos que a consolidação nem recalcula.
+  const janela = [...ultimosMesesFechados(MESES_DE_HISTORICO, ref), monthKey(ref)];
   const mensais = await prisma.customerMonthlyRevenue.findMany({
+    where: { mesKey: { in: janela } },
     select: { customerConexaId: true, mesKey: true, receita: true },
   });
   const porCliente = new Map<number, Map<string, Prisma.Decimal>>();

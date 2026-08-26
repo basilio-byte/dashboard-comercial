@@ -39,7 +39,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-dev-secret-troque-em-producao}
       CONEXA_BASE_URL: https://seahubcoworking.conexa.app/index.php/api/v2
       CONEXA_API_TOKEN: ${CONEXA_API_TOKEN:-}
-      CONEXA_RATE_LIMIT_PER_MIN: "15"
+      CONEXA_RATE_LIMIT_PER_MIN: "35"
       # Disparo desligado — todos os defaults fecham (ADR-0004).
       NOTIFICADOR: "off"
       NOTIFICADOR_MODO: dry-run

@@ -60,7 +60,11 @@ export function horasInclusasMensais(
   if (!Array.isArray(quotas) || quotas.length === 0) return null;
   const mensais = quotas.filter((q) => (q.validityType ?? "Monthly") === "Monthly");
   if (mensais.length === 0) return null;
-  return mensais.reduce((acc, q) => acc.plus(new Prisma.Decimal(String(q.quantity ?? 0))), new Prisma.Decimal(0));
+  // ⚠ `quantity` nulo é LACUNA, não zero. Somar 0 produzia uma cota de 0h que
+  // passa no teste `!= null`, gera saldo negativo e marcava a base inteira do
+  // plano como "estourando a cota" de uma vez.
+  if (mensais.some((q) => q.quantity === null || q.quantity === undefined)) return null;
+  return mensais.reduce((acc, q) => acc.plus(new Prisma.Decimal(String(q.quantity))), new Prisma.Decimal(0));
 }
 
 export function mapCompany(c: ConexaCompany) {

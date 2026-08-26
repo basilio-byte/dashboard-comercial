@@ -39,11 +39,13 @@ export interface ConexaPage<T> {
 /**
  * Limitador de taxa: serializa as requisições com espaçamento mínimo.
  *
- * ⚠ Vale **por processo**. O teto de 60 req/min do Conexa é da CONTA, e o
- * Dashboard Financeiro já consome parte dele em produção no mesmo servidor —
- * por isso o default do comercial é conservador (15 req/min), não 60. Dois
- * processos com o limitador cheio consomem ~120/min contra um teto de 60, e a
- * degradação é lenta, portanto descoberta tarde. Ver ADR-0002.
+ * ⚠ Vale **por processo** — ver a nota do `globalThis` abaixo, que é o que
+ * garante um único limitador dentro do processo.
+ *
+ * Teto medido da API: 60 req/min, janela de 60s. Medição de 2026-08-26 (22
+ * janelas) mostrou **zero** consumo de terceiros: o financeiro em produção usa
+ * login web, não a API v2. O ritmo configurado é um TETO, não um alvo — em
+ * regime o comercial gasta ~50 requisições por dia. Ver ADR-0002.
  */
 class RateLimiter {
   private queue: Promise<void> = Promise.resolve();
@@ -70,23 +72,86 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-let limiter: RateLimiter | null = null;
+/**
+ * ⚠ O singleton vive em `globalThis`, NÃO num `let` de módulo.
+ *
+ * O Next empacota a camada de route handler e a camada RSC/server action em
+ * bundles SEPARADOS. Verificado no build deste projeto: `chunks/753.js` e
+ * `chunks/918.js` contêm, cada um, uma cópia desta classe — `/api/sync` carrega
+ * só o 918, `/reconciliacao` só o 753, `/operacao` os dois. Com um `let` de
+ * módulo isso são DOIS limitadores independentes no mesmo processo Node, cada
+ * um convencido de que tem o teto inteiro, e a taxa real vira 2× a configurada.
+ *
+ * É o mesmo motivo pelo qual `src/lib/db.ts` protege o Prisma com `globalThis`.
+ * O bug ficou invisível em 15 req/min (2 × 14,3 = 28,6, abaixo de 60) e só
+ * apareceria ao subir o ritmo — achado de auditoria adversarial.
+ */
+const CHAVE_LIMITER = Symbol.for("seahub.comercial.conexa.limiter");
+type GlobalComLimiter = typeof globalThis & { [CHAVE_LIMITER]?: RateLimiter };
+
 function getLimiter(): RateLimiter {
-  if (!limiter) limiter = new RateLimiter(getEnv().CONEXA_RATE_LIMIT_PER_MIN);
-  return limiter;
+  const g = globalThis as GlobalComLimiter;
+  if (!g[CHAVE_LIMITER]) g[CHAVE_LIMITER] = new RateLimiter(getEnv().CONEXA_RATE_LIMIT_PER_MIN);
+  return g[CHAVE_LIMITER]!;
 }
 
-/** Contador de requisições do processo — alimenta a tela /operacao. */
-let requisicoesTotais = 0;
+/**
+ * Contador de requisições do processo. Também em `globalThis`, pelo mesmo
+ * motivo do limitador: senão cada bundle conta as suas e a tela de operação
+ * mostra um número menor que o real.
+ */
+const CHAVE_CONTADOR = Symbol.for("seahub.comercial.conexa.contador");
+type GlobalComContador = typeof globalThis & { [CHAVE_CONTADOR]?: { n: number } };
+function contador(): { n: number } {
+  const g = globalThis as GlobalComContador;
+  if (!g[CHAVE_CONTADOR]) g[CHAVE_CONTADOR] = { n: 0 };
+  return g[CHAVE_CONTADOR]!;
+}
 export function requisicoesFeitas(): number {
-  return requisicoesTotais;
+  return contador().n;
 }
 
-/** Último rate limit observado, para a tela de operação. */
-let ultimoRateLimit: { limite: number | null; restante: number | null; em: string } | null = null;
-export function ultimoRateLimitObservado() {
-  return ultimoRateLimit;
+/**
+ * Último rate limit observado. Global pelo mesmo motivo do limitador.
+ *
+ * Era lido do header e jogado fora — o sistema tinha a informação para saber
+ * que estava perto do teto e não a usava em lugar nenhum. Agora alimenta a tela
+ * de operação e o freio preventivo abaixo.
+ */
+export interface RateLimitObservado {
+  limite: number | null;
+  restante: number | null;
+  resetEmSegundos: number | null;
+  em: string;
 }
+const CHAVE_RL = Symbol.for("seahub.comercial.conexa.ratelimit");
+type GlobalComRL = typeof globalThis & { [CHAVE_RL]?: RateLimitObservado | null };
+export function ultimoRateLimitObservado(): RateLimitObservado | null {
+  return (globalThis as GlobalComRL)[CHAVE_RL] ?? null;
+}
+
+/** Abaixo disto, esperamos o reset em vez de insistir e tomar 429. */
+const MARGEM_DE_FREIO = 3;
+
+/**
+ * Contador de 429 do processo.
+ *
+ * O ADR-0002 define como critério de validação "zero 429 por 7 dias corridos",
+ * e não havia nada contando — o critério daria verde num sistema estourando o
+ * teto o dia inteiro. Global pelo mesmo motivo do limitador.
+ */
+const CHAVE_429 = Symbol.for("seahub.comercial.conexa.429");
+type GlobalCom429 = typeof globalThis & { [CHAVE_429]?: { n: number; ultimo: string | null } };
+function contador429(): { n: number; ultimo: string | null } {
+  const g = globalThis as GlobalCom429;
+  if (!g[CHAVE_429]) g[CHAVE_429] = { n: 0, ultimo: null };
+  return g[CHAVE_429]!;
+}
+export function respostas429(): { n: number; ultimo: string | null } {
+  return { ...contador429() };
+}
+
+
 
 function buildUrl(path: string, query?: Query): string {
   const env = getEnv();
@@ -137,7 +202,7 @@ export async function conexaFetch<T>(
     let result: Response;
     try {
       result = await getLimiter().schedule(async () => {
-        requisicoesTotais++;
+        contador().n++;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         if (opts.signal) opts.signal.addEventListener("abort", () => controller.abort());
@@ -170,12 +235,27 @@ export async function conexaFetch<T>(
 
     const limite = Number(result.headers.get("X-Rate-Limit-Limit"));
     const restante = Number(result.headers.get("X-Rate-Limit-Remaining"));
+    const reset = Number(result.headers.get("X-Rate-Limit-Reset"));
     if (Number.isFinite(limite) || Number.isFinite(restante)) {
-      ultimoRateLimit = {
+      (globalThis as GlobalComRL)[CHAVE_RL] = {
         limite: Number.isFinite(limite) ? limite : null,
         restante: Number.isFinite(restante) ? restante : null,
+        resetEmSegundos: Number.isFinite(reset) ? reset : null,
         em: new Date().toISOString(),
       };
+    }
+
+    // FREIO PREVENTIVO. Um 429 custa ~56s de sono e sete tentativas; esperar o
+    // reset quando o balde está quase vazio custa menos e é previsível. A
+    // informação já vinha no header — só não era usada.
+    if (Number.isFinite(restante) && restante <= MARGEM_DE_FREIO && Number.isFinite(reset) && reset > 0) {
+      await sleep(reset * 1000 + 250);
+    }
+
+    if (result.status === 429) {
+      const c = contador429();
+      c.n++;
+      c.ultimo = new Date().toISOString();
     }
 
     if (result.status === 429 && attempt <= MAX_RETRIES) {

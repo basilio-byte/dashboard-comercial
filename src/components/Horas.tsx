@@ -57,11 +57,19 @@ export function BlocoHoras({ dados, confiavel }: { dados: HorasDoCliente; confia
         ) : null}
       </div>
 
+      {dados.fechados.some((c) => !c.conclusivo) ? (
+        <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <strong>Há ciclos não conclusivos.</strong> Alguma reserva não pôde ser classificada —
+          duração ausente ou status fora dos documentados. Esses ciclos <strong>não</strong> contam
+          para o sinal de excedente: um ciclo com buraco não confirma nem nega estouro.
+        </div>
+      ) : null}
+
       {dados.sinal?.recorrente ? (
         <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <strong>Estoura a cota com recorrência.</strong> {dados.sinal.ciclosComEstouro} dos{" "}
-          {dados.sinal.ciclos.length} ciclos fechados, somando {h(dados.sinal.horasExcedentes)} pagas
-          por fora do plano. Candidato a upgrade.
+          {dados.sinal.ciclosConclusivos} ciclos conclusivos, somando{" "}
+          {h(dados.sinal.horasExcedentes)} pagas por fora do plano. Candidato a upgrade.
         </div>
       ) : null}
 
@@ -98,6 +106,7 @@ function TabelaCiclos({
             <th className="px-4 py-2 text-right font-medium">Reservas</th>
             <th className="px-4 py-2 text-right font-medium">Abatido da cota</th>
             <th className="px-4 py-2 text-right font-medium">Faturado à parte</th>
+            <th className="px-4 py-2 text-right font-medium">Não classificado</th>
             <th className="px-4 py-2 text-right font-medium">{semCota ? "Total" : "Saldo"}</th>
           </tr>
         </thead>
@@ -116,6 +125,18 @@ function TabelaCiclos({
                   className={`px-4 py-2 text-right tabular-nums ${c.estourou ? "font-medium text-red-700" : ""}`}
                 >
                   {h(c.faturado)}
+                </td>
+                <td className="px-4 py-2 text-right tabular-nums text-neutral-500">
+                  {/* naoFaturado (ambíguo) + horasDesconhecidas (buraco). Eram
+                      calculados e nunca exibidos — cálculo invisível é o mesmo
+                      que não ter. */}
+                  {c.naoFaturado.isZero() && c.horasDesconhecidas.isZero() ? (
+                    "—"
+                  ) : (
+                    <span title="Reservas não faturadas (cobrança pendente ou cortesia) e reservas que não pudemos classificar">
+                      {h(c.naoFaturado.plus(c.horasDesconhecidas))}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">
                   {semCota ? h(c.consumido) : h(c.saldo)}

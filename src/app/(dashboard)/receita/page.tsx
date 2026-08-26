@@ -2,12 +2,15 @@ import { prisma } from "@/lib/db";
 import { formatBRL, money, roundMoney, sum, variacaoPercentual } from "@/lib/money";
 import { currentMonthKey, rotuloMes, ultimosMesesFechados } from "@/lib/dates";
 import { Procedencia } from "@/components/Procedencia";
+import { estadoDoEspelho } from "@/lib/intel/completude";
+import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
 import { corVariacao, pct } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function Receita() {
   const meses = [...ultimosMesesFechados(12), currentMonthKey()];
+  const espelho = await estadoDoEspelho();
 
   const linhas = await prisma.customerMonthlyRevenue.groupBy({
     by: ["mesKey"],
@@ -41,10 +44,19 @@ export default async function Receita() {
         </p>
       </div>
 
+      <AvisoCompletude estado={espelho} />
+
       <div className="rounded border border-neutral-200 bg-white px-4 py-3">
         <div className="text-sm text-neutral-500">Total dos 12 meses fechados</div>
-        <div className="mt-1 text-2xl font-semibold tabular-nums">{formatBRL(totalFechado)}</div>
-        <div className="mt-1"><Procedencia tipo="DERIVADO" /></div>
+        <div className="mt-1 text-2xl font-semibold tabular-nums">
+          {/* Mesmo gate do Panorama. Sem isto, com a carga de cobranças parada,
+              o Panorama dizia "indisponível" e esta tela dizia um total com selo
+              de fato — duas telas do mesmo dashboard se contradizendo. */}
+          <ValorOuLacuna valor={formatBRL(totalFechado)} confiavel={espelho.receitaConfiavel} />
+        </div>
+        <div className="mt-1">
+          <Procedencia tipo={espelho.receitaConfiavel ? "DERIVADO" : "INDISPONIVEL"} />
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded border border-neutral-200 bg-white">

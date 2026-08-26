@@ -29,12 +29,20 @@ const envSchema = z.object({
   CONEXA_API_TOKEN: z.string().default(""),
 
   /**
-   * ⚠ CONSERVADOR DE PROPÓSITO. O teto de 60 req/min do Conexa é da CONTA, e o
-   * dashboard financeiro já consome parte dele em produção no mesmo servidor.
-   * Dois processos com o limitador cheio consomem ~120/min contra um teto de
-   * 60, e a degradação é lenta — portanto descoberta tarde. Ver ADR-0002.
+   * Teto de requisições por minuto contra o Conexa. É um TETO, não um alvo: em
+   * regime o comercial gasta ~50 requisições por DIA; o consumo pesado é só a
+   * carga inicial (~1.270 requisições, uma vez).
+   *
+   * Medido em 2026-08-26: `X-Rate-Limit-Limit = 60`, e 22 janelas consecutivas
+   * mostraram **zero** consumo de terceiros — o financeiro em produção usa
+   * login web, não a API v2, e o projeto que usava a API foi desativado.
+   *
+   * 35 e não 60: os agentes do Chatwoot passarão a consumir a API em algum
+   * momento, com consumo POR EVENTO (rajada quando um cliente escreve) e sem
+   * limitador próprio. Os ~25 req/min de folga são para essa rajada. O ganho de
+   * 35 para 60 é ~13 minutos numa carga que roda uma vez — não compra o risco.
    */
-  CONEXA_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(15),
+  CONEXA_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(35),
 
   /** Segredo do header `x-cron-secret` das rotas de sync/regras. */
   CRON_SECRET: z.string().default(""),
