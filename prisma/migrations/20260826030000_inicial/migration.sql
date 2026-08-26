@@ -404,9 +404,6 @@ ALTER TABLE "sessions" ADD CONSTRAINT "sessions_userId_fkey" FOREIGN KEY ("userI
 ALTER TABLE "login_events" ADD CONSTRAINT "login_events_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "fact_contracts" ADD CONSTRAINT "fact_contracts_customerConexaId_fkey" FOREIGN KEY ("customerConexaId") REFERENCES "dim_customers"("conexaId") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "intel_customer_monthly_revenue" ADD CONSTRAINT "intel_customer_monthly_revenue_customerConexaId_fkey" FOREIGN KEY ("customerConexaId") REFERENCES "dim_customers"("conexaId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey

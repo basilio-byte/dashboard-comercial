@@ -159,9 +159,10 @@ model Customer {
   raw             Json
   syncedAt        DateTime @default(now())
 
-  contracts Contract[]
-  monthly   CustomerMonthlyRevenue[]
-  profile   CustomerProfile?
+  // Só as tabelas DERIVADAS têm relação: elas são nossas, nascem depois dos
+  // clientes e o cascade delete é desejável. As de espelho, não — ver Contract.
+  monthly CustomerMonthlyRevenue[]
+  profile CustomerProfile?
 
   @@index([companyConexaId])
   @@index([isActive, isBlocked])
@@ -174,8 +175,20 @@ model Customer {
 
 model Contract {
   conexaId           Int       @id
+  /// ⚠ SEM relação para Customer, de propósito.
+  ///
+  /// Uma chave estrangeira aqui faz o espelho **recusar dado que existe na
+  /// origem**: carregar contratos antes dos clientes viola a constraint e a
+  /// janela inteira falha. Aconteceu na primeira carga real.
+  ///
+  /// Num espelho de sistema externo, integridade referencial é responsabilidade
+  /// da ORIGEM. Referência pendente é estado normal e esperado — o cliente pode
+  /// não ter sido carregado ainda, ou ter sido removido no ERP. Recusar o
+  /// contrato por causa disso perde dado que existe.
+  ///
+  /// O projeto irmão chegou à mesma conclusão: lá `customerConexaId` também é
+  /// um `Int?` com índice, sem relação.
   customerConexaId   Int?
-  customer           Customer? @relation(fields: [customerConexaId], references: [conexaId], onDelete: SetNull)
   planConexaId       Int?
   companyConexaId    Int?
   costCenterConexaId Int?

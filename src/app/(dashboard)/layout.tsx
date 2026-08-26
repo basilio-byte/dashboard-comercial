@@ -8,6 +8,7 @@ const NAV = [
   { href: "/clientes", rotulo: "Clientes" },
   { href: "/receita", rotulo: "Receita" },
   { href: "/reconciliacao", rotulo: "Reconciliação" },
+  { href: "/validacao", rotulo: "Validação" },
   { href: "/operacao", rotulo: "Operação" },
 ];
 

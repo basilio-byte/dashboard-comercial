@@ -233,23 +233,31 @@ export async function clientesComExcedente(
   }
 
   const limite = opts.limite ?? 500;
-  const candidatos = await prisma.contract.findMany({
-    where: {
-      isActive: true,
-      planConexaId: { not: null },
-      customerConexaId: { not: null },
-      // Gate de elegibilidade no WHERE, e não depois de N idas ao banco.
-      customer: { isActive: true, isBlocked: false },
-    },
+
+  // Duas etapas, porque o espelho NÃO tem chave estrangeira entre contrato e
+  // cliente (ver o comentário no schema): a relação não existe para o Prisma
+  // filtrar num join. Buscamos os contratos e aplicamos o gate de elegibilidade
+  // com um único `findMany` de clientes — ainda antes do laço caro.
+  const contratos = await prisma.contract.findMany({
+    where: { isActive: true, planConexaId: { not: null }, customerConexaId: { not: null } },
     select: { customerConexaId: true },
     distinct: ["customerConexaId"],
-    // Sem `orderBy` o Postgres não garante QUAIS 500 — a fila do vendedor
-    // mudaria entre execuções sem nada ter mudado no negócio.
+    // Sem `orderBy` o Postgres não garante QUAIS registros vêm — a fila do
+    // vendedor mudaria entre execuções sem nada ter mudado no negócio.
     orderBy: { customerConexaId: "asc" },
-    take: limite + 1,
   });
-  const truncado = candidatos.length > limite;
-  const alvos = candidatos.slice(0, limite);
+  const ids = contratos.map((c) => c.customerConexaId!).filter((x) => x !== null);
+
+  // Gate de elegibilidade (ADR-0010): inativo ou bloqueado nunca vira sinal.
+  const elegiveis = await prisma.customer.findMany({
+    where: { conexaId: { in: ids }, isActive: true, isBlocked: false },
+    select: { conexaId: true, name: true },
+    orderBy: { conexaId: "asc" },
+  });
+  const nomePor = new Map(elegiveis.map((c) => [c.conexaId, c.name]));
+
+  const truncado = elegiveis.length > limite;
+  const alvos = elegiveis.slice(0, limite).map((c) => ({ customerConexaId: c.conexaId }));
 
   const itens: FilaExcedente["itens"] = [];
   let ambiguos = 0;
@@ -262,11 +270,7 @@ export async function clientesComExcedente(
       continue; // não inventa atribuição: fica de fora e é contado
     }
     if (!horas.sinal?.recorrente) continue;
-    const cliente = await prisma.customer.findUnique({
-      where: { conexaId: customerConexaId },
-      select: { name: true },
-    });
-    itens.push({ customerConexaId, nome: cliente?.name ?? null, horas });
+    itens.push({ customerConexaId, nome: nomePor.get(customerConexaId) ?? null, horas });
   }
 
   return {
