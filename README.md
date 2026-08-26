@@ -61,7 +61,7 @@ npm install
 cp .env.example .env          # preencha SESSION_SECRET e ADMIN_EMAIL/ADMIN_PASSWORD
 docker compose up -d db       # Postgres na porta 5433 (5432 é do financeiro)
 npm run prisma:migrate
-npm run dev                   # http://localhost:3000
+npm run dev                   # http://localhost:7000
 ```
 
 | Script | Ação |
@@ -105,7 +105,7 @@ rodando em produção.
 **Guia completo, com todas as variáveis: [`docs/context/deploy-easypanel.md`](docs/context/deploy-easypanel.md).**
 
 Resumo: serviço **Postgres próprio** + serviço **Docker Image** apontando para
-`ghcr.io/basilio-byte/dashboard-comercial:latest`, porta `3000`, healthcheck em
+`ghcr.io/basilio-byte/dashboard-comercial:latest`, porta `7000`, healthcheck em
 `GET /api/health`, **uma réplica**.
 
 Mínimo de variáveis para subir: `DATABASE_URL`, `SESSION_SECRET`, `APP_URL`,

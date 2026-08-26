@@ -58,7 +58,7 @@ Anotar a connection string — ela vira `DATABASE_URL`.
 
 Tipo **Docker Image** → `ghcr.io/basilio-byte/dashboard-comercial:latest`
 
-- **Porta:** `3000`
+- **Porta:** `7000`
 - **Healthcheck:** `GET /api/health`
 - **Réplicas: 1.** Ver ADR-0003 — dois agendadores competem pelo mesmo teto de
   requisições do Conexa. Numa réplica extra, `SYNC_SCHEDULER=off` é obrigatório.

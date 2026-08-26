@@ -57,7 +57,12 @@ RUN apk add --no-cache tini
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
-# Artefatos do build standalone
+# Artefatos do build standalone.
+#
+# ⚠ `public/` PRECISA ter ao menos um arquivo versionado. O git não versiona
+# diretório vazio: a pasta existia na máquina de desenvolvimento, o build local
+# passava, e o CI — que faz checkout limpo — quebrava aqui com
+# "/app/public: not found". `public/robots.txt` garante que ela exista.
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
@@ -80,8 +85,11 @@ COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 
 USER nextjs
-EXPOSE 3000
-ENV PORT=3000
+EXPOSE 7000
+# Porta do serviço. Continua sobreponível por env (`PORT`) — o servidor
+# standalone do Next lê a variável — mas o default é 7000, que é o que o
+# serviço no Easypanel espera.
+ENV PORT=7000
 ENV HOSTNAME=0.0.0.0
 # Fuso do PROCESSO fixado em UTC. A aritmética de ciclo converte explicitamente
 # para America/Fortaleza; deixar o processo num fuso deslocado fazia a conta sair

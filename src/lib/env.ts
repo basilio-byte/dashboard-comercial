@@ -10,7 +10,7 @@ import { z } from "zod";
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  APP_URL: z.string().url().default("http://localhost:7000"),
   /** Fuso de referência. Todo corte de dia acontece no relógio de parede da empresa. */
   APP_TIMEZONE: z.string().default("America/Fortaleza"),
 

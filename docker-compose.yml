@@ -33,7 +33,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      APP_URL: http://localhost:3000
+      APP_URL: http://localhost:7000
       APP_TIMEZONE: America/Fortaleza
       DATABASE_URL: postgres://comercial:comercial@db:5432/seahub_comercial
       SESSION_SECRET: ${SESSION_SECRET:-dev-secret-troque-em-producao}
@@ -48,7 +48,7 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     ports:
-      - "3000:3000"
+      - "7000:7000"
     # Tempo para o tini encaminhar o SIGTERM e a aplicação drenar antes do kill.
     stop_grace_period: 30s
 

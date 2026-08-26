@@ -1,0 +1,3 @@
+# Painel interno da Seahub. Não deve ser indexado por buscador nenhum.
+User-agent: *
+Disallow: /
