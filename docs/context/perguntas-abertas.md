@@ -2,6 +2,26 @@
 
 Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem resposta trava a fase.
 
+> ✅ **Respondido em 2026-08-26 pelo responsável da Seahub** — as três incógnitas do ciclo da cota,
+> que bloqueavam a Fase 3 (perguntas 4, 5 e as correlatas):
+>
+> - **Ciclo:** 30 dias ancorados na **data de contratação**, não no mês-calendário. Exemplo dado:
+>   contratou 26/08 → vale até 25/09 → novo pacote em 26/09.
+>   ⚠ Esse exemplo descreve um **aniversário mensal** (dia 26 de cada mês), não 30 dias exatos; as
+>   duas coisas divergem ao longo do ano. Adotado o aniversário do dia do mês, com clamp para meses
+>   curtos (dia 31 → último dia de fevereiro).
+> - **Carry-over:** **não existe**. As horas expiram ao fim do ciclo, usadas ou não.
+> - **Excedente:** dedução parcial **e** cobrança. 5h de cota com 7h de uso = 5h abatidas + 2h
+>   faturadas.
+>
+> **Mudança de ênfase, e ela reordena o trabalho:** o que mais importa é medir que o cliente **tem**
+> as horas e se ele **usa mais do que o plano oferece**. O sinal forte é o **excedente recorrente**,
+> não o saldo instantâneo — e o excedente é observável mesmo sem acertar o saldo ao minuto, porque a
+> dedução parcial deixa rastro na cobrança do excedente.
+>
+> **Escopo novo:** acompanhar também quem **compra pacote de horas fora do EV** — compra avulsa, sem
+> plano de Endereço Fiscal atrelado.
+
 ---
 
 ## 🔴 Bloqueiam a Fase 0 — acesso, credenciais, infraestrutura

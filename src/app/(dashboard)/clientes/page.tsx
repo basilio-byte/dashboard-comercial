@@ -4,6 +4,8 @@ import { formatBRL } from "@/lib/money";
 import { rotuloMes, ultimoMesFechado } from "@/lib/dates";
 import { Procedencia } from "@/components/Procedencia";
 import { corVariacao, pct } from "@/lib/ui";
+import { estadoDoEspelho } from "@/lib/intel/completude";
+import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,7 @@ export default async function Clientes({
   const { q } = await searchParams;
   const busca = (q ?? "").trim();
   const mesFechado = ultimoMesFechado();
+  const espelho = await estadoDoEspelho();
 
   const perfis = await prisma.customerProfile.findMany({
     where: busca
@@ -44,6 +47,8 @@ export default async function Clientes({
         <h1 className="text-xl font-semibold">Clientes</h1>
         <span className="text-sm text-neutral-500">{perfis.length} exibidos</span>
       </div>
+
+      <AvisoCompletude estado={espelho} />
 
       <form className="flex gap-2">
         <input
@@ -97,7 +102,12 @@ export default async function Clientes({
                           : "—"
                         : `${Number(p.horasInclusasMes)}h`}
                     </td>
-                    <td className="px-4 py-2 text-right tabular-nums">{formatBRL(p.receitaAnoCorrente.toString())}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      <ValorOuLacuna
+                        valor={formatBRL(p.receitaAnoCorrente.toString())}
+                        confiavel={espelho.receitaConfiavel}
+                      />
+                    </td>
                     <td className={`px-4 py-2 text-right tabular-nums ${corVariacao(v === null || v === undefined ? null : Number(v))}`}>
                       {pct(v === null || v === undefined ? null : Number(v))}
                     </td>

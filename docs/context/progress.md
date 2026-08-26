@@ -4,6 +4,41 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-26 — Selo de completude, e o ciclo da cota respondido
+
+**Um bug real, achado rodando a primeira carga.** O backfill parou no teto de páginas com só os
+clientes carregados; a consolidação rodou assim mesmo e produziu **5.000 perfis com receita
+R$ 0,00** — indistinguíveis de clientes que de fato não faturaram. Isso viola a regra de ouro do
+projeto: zero e "ainda não carreguei" viraram a mesma coisa na tela. Pior, sobre esses zeros a
+regra de tendência veria a base inteira despencando.
+
+**Corrigido** com o selo de completude que o ADR-0011 documentava mas que eu não tinha codificado:
+
+- `src/lib/intel/completude.ts` — `estadoDoEspelho()` diz, por entidade, se o backfill terminou
+  (sem cursor pendente **e** com registros).
+- A consolidação grava `procedencia: INDISPONIVEL` quando a fonte está incompleta.
+- A UI mostra **"não disponível"** no lugar do valor, com aviso no topo; Top 5 e alerta de queda
+  ficam suprimidos — um ranking sobre dado parcial aponta o cliente errado.
+
+Verificado: com o espelho incompleto, os 5.000 perfis saíram marcados `INDISPONIVEL`.
+
+**As três incógnitas do ciclo da cota foram respondidas** pelo responsável — ver
+[perguntas-abertas.md](perguntas-abertas.md). Resumo: ciclo ancorado na **data de contratação**
+(não no mês-calendário), **sem carry-over**, e excedente **abatido e cobrado**.
+
+⚠ O exemplo dado (26/08 → 25/09 → novo em 26/09) descreve um **aniversário mensal**, não 30 dias
+exatos. As duas leituras divergem ao longo do ano; adotado o aniversário do dia do mês.
+
+**Isso reordena a Fase 3.** O responsável disse que o mais importante é medir se o cliente **usa
+mais horas do que o plano oferece** — o sinal forte é o **excedente recorrente**, não o saldo
+instantâneo. E o excedente é mais fácil de acertar: a dedução parcial deixa rastro na cobrança do
+excedente, então dá para observá-lo sem depender de acertar o saldo ao minuto.
+
+**Escopo novo:** acompanhar quem compra pacote de horas **fora do EV** (avulso, sem plano de
+Endereço Fiscal atrelado).
+
+---
+
 ## 2026-08-26 — Fase 1: espelho, métricas e telas
 
 **Feito.** Espelho local do Conexa (clientes, contratos, planos, produtos, categorias, empresas,

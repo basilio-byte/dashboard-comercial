@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { monthBounds, monthKey, nowInAppTz, ultimosMesesFechados } from "@/lib/dates";
 import { money, roundMoney, variacaoPercentual } from "@/lib/money";
 import { contaComoReceita, valorFaturado } from "@/lib/metrics/receita";
+import { estadoDoEspelho } from "./completude";
 
 /**
  * Consolidação do perfil comercial de cada cliente.
@@ -21,6 +22,9 @@ export interface ResultadoConsolidacao {
   clientes: number;
   mesesCalculados: number;
   duracaoMs: number;
+  /** false = o espelho está incompleto e os números saíram marcados como lacuna. */
+  receitaConfiavel: boolean;
+  incompletas: string[];
 }
 
 /**
@@ -31,7 +35,13 @@ export interface ResultadoConsolidacao {
  * como incompleto na UI e **nunca** participa do cálculo de variação usado por
  * regra de tendência. Ver `ultimosMesesFechados`.
  */
-export async function consolidarReceitaMensal(ref: Date = nowInAppTz()): Promise<number> {
+export async function consolidarReceitaMensal(
+  ref: Date = nowInAppTz(),
+  receitaConfiavel = true,
+): Promise<number> {
+  // Sem cobrança completa no espelho, o número derivado NÃO é fato — é lacuna.
+  // Ver completude.ts para o incidente que motivou isto.
+  const procedencia = receitaConfiavel ? "DERIVADO" : "INDISPONIVEL";
   const fechados = ultimosMesesFechados(MESES_DE_HISTORICO, ref);
   const meses = [...fechados, monthKey(ref)]; // corrente por último
 
@@ -88,11 +98,13 @@ export async function consolidarReceitaMensal(ref: Date = nowInAppTz()): Promise
             receita: v.receita,
             cobrancas: v.cobrancas,
             variacaoPct: variacao === null ? null : new Prisma.Decimal(variacao.toFixed(4)),
+            procedencia,
           },
           update: {
             receita: v.receita,
             cobrancas: v.cobrancas,
             variacaoPct: variacao === null ? null : new Prisma.Decimal(variacao.toFixed(4)),
+            procedencia,
             calculadoEm: new Date(),
           },
         }),
@@ -113,7 +125,11 @@ export async function consolidarReceitaMensal(ref: Date = nowInAppTz()): Promise
  * Recalcula o perfil consolidado de cada cliente: receita do ano, dos 12 meses,
  * segmentos, horas inclusas e a âncora dos marcos de contrato.
  */
-export async function consolidarPerfis(ref: Date = nowInAppTz()): Promise<number> {
+export async function consolidarPerfis(
+  ref: Date = nowInAppTz(),
+  receitaConfiavel = true,
+): Promise<number> {
+  const procedencia = receitaConfiavel ? "DERIVADO" : "INDISPONIVEL";
   const anoCorrente = ref.getFullYear();
   const doze = ultimosMesesFechados(12, ref);
 
@@ -201,6 +217,7 @@ export async function consolidarPerfis(ref: Date = nowInAppTz()): Promise<number
           temContratoAtivo: Boolean(ct?.n),
           contratosAtivos: ct?.n ?? 0,
           contratoDesde: ct?.desde ?? null,
+          procedencia,
         },
         update: {
           receitaAnoCorrente: ano,
@@ -211,6 +228,7 @@ export async function consolidarPerfis(ref: Date = nowInAppTz()): Promise<number
           temContratoAtivo: Boolean(ct?.n),
           contratosAtivos: ct?.n ?? 0,
           contratoDesde: ct?.desde ?? null,
+          procedencia,
           calculadoEm: new Date(),
         },
       }),
@@ -230,14 +248,20 @@ export async function consolidarTudo(ref: Date = nowInAppTz()): Promise<Resultad
     data: { mode: "intelligence", ownerId: "intel", heartbeatAt: new Date() },
   });
   try {
-    const mesesCalculados = await consolidarReceitaMensal(ref);
-    const clientes = await consolidarPerfis(ref);
+    const espelho = await estadoDoEspelho();
+    const mesesCalculados = await consolidarReceitaMensal(ref, espelho.receitaConfiavel);
+    const clientes = await consolidarPerfis(ref, espelho.receitaConfiavel);
     const duracaoMs = Date.now() - t0;
     await prisma.syncRun.update({
       where: { id: run.id },
-      data: { status: "SUCCESS", finishedAt: new Date(), recordsWrote: clientes, detail: { duracaoMs } },
+      data: {
+        status: "SUCCESS",
+        finishedAt: new Date(),
+        recordsWrote: clientes,
+        detail: { duracaoMs, receitaConfiavel: espelho.receitaConfiavel, incompletas: espelho.incompletas },
+      },
     });
-    return { clientes, mesesCalculados, duracaoMs };
+    return { clientes, mesesCalculados, duracaoMs, receitaConfiavel: espelho.receitaConfiavel, incompletas: espelho.incompletas };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await prisma.syncRun.update({

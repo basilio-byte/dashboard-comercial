@@ -5,6 +5,8 @@ import { nowInAppTz, rotuloMes, ultimoMesFechado, ultimosMesesFechados } from "@
 import { participacao, topClientes } from "@/lib/metrics/receita";
 import { Procedencia } from "@/components/Procedencia";
 import { corVariacao, pct } from "@/lib/ui";
+import { estadoDoEspelho } from "@/lib/intel/completude";
+import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +16,7 @@ export default async function Panorama() {
   const mesFechado = ultimoMesFechado(agora);
   const doze = ultimosMesesFechados(12, agora);
 
-  const [perfis, mensaisMes, ultimoSync] = await Promise.all([
+  const [perfis, mensaisMes, ultimoSync, espelho] = await Promise.all([
     prisma.customerProfile.findMany({
       where: { receitaAnoCorrente: { gt: 0 } },
       select: { customerConexaId: true, receitaAnoCorrente: true, customer: { select: { name: true } } },
@@ -30,6 +32,7 @@ export default async function Panorama() {
       orderBy: { finishedAt: "desc" },
       select: { finishedAt: true, mode: true },
     }),
+    estadoDoEspelho(),
   ]);
 
   const semDados = perfis.length === 0 && mensaisMes.length === 0;
@@ -66,6 +69,8 @@ export default async function Panorama() {
         </p>
       </div>
 
+      <AvisoCompletude estado={espelho} />
+
       {semDados ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <strong>Sem dados ainda.</strong> Rode a primeira carga em{" "}
@@ -81,11 +86,13 @@ export default async function Panorama() {
           titulo={`Receita ${anoCorrente}`}
           valor={formatBRL(totalAno)}
           nota={`${perfis.length} clientes com receita`}
+          confiavel={espelho.receitaConfiavel}
         />
         <Cartao
           titulo={`Receita de ${rotuloMes(mesFechado)}`}
           valor={formatBRL(totalMes)}
           nota={`${mensaisMes.length} clientes faturados`}
+          confiavel={espelho.receitaConfiavel}
         />
       </section>
 
@@ -93,7 +100,12 @@ export default async function Panorama() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
           Top 5 clientes · {anoCorrente}
         </h2>
-        {top5.length === 0 ? (
+        {!espelho.receitaConfiavel ? (
+          <p className="mt-3 text-sm text-neutral-500">
+            Indisponível enquanto a carga de cobranças não terminar — um ranking sobre dado parcial
+            apontaria o cliente errado.
+          </p>
+        ) : top5.length === 0 ? (
           <p className="mt-3 text-sm text-neutral-500">Nenhum cliente com receita no ano.</p>
         ) : (
           <ol className="mt-3 divide-y divide-neutral-200 rounded border border-neutral-200 bg-white">
@@ -123,7 +135,12 @@ export default async function Panorama() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
           Queda de receita em {rotuloMes(mesFechado)}
         </h2>
-        {emQueda.length === 0 ? (
+        {!espelho.receitaConfiavel ? (
+          <p className="mt-3 text-sm text-neutral-500">
+            Indisponível enquanto a carga de cobranças não terminar — sobre dado parcial, a base
+            inteira pareceria estar despencando.
+          </p>
+        ) : emQueda.length === 0 ? (
           <p className="mt-3 text-sm text-neutral-500">
             Nenhum cliente com queda de 30% ou mais — entre os que têm mês anterior para comparar.
           </p>
@@ -151,14 +168,26 @@ export default async function Panorama() {
   );
 }
 
-function Cartao({ titulo, valor, nota }: { titulo: string; valor: string; nota: string }) {
+function Cartao({
+  titulo,
+  valor,
+  nota,
+  confiavel,
+}: {
+  titulo: string;
+  valor: string;
+  nota: string;
+  confiavel: boolean;
+}) {
   return (
     <div className="rounded border border-neutral-200 bg-white px-4 py-3">
       <div className="text-sm text-neutral-500">{titulo}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{valor}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">
+        <ValorOuLacuna valor={valor} confiavel={confiavel} />
+      </div>
       <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
-        <Procedencia tipo="DERIVADO" />
-        {nota}
+        <Procedencia tipo={confiavel ? "DERIVADO" : "INDISPONIVEL"} />
+        {confiavel ? nota : "carga incompleta"}
       </div>
     </div>
   );
