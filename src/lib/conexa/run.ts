@@ -39,11 +39,28 @@ export interface TotaisDoRun {
   gravados: number;
 }
 
+/**
+ * Requisições já feitas quando cada run abriu.
+ *
+ * ⚠ `requisicoesFeitas()` conta o PROCESSO inteiro, não o run. Gravar o valor
+ * bruto fazia a coluna "Req." somar o consumo de tudo que rodou antes no mesmo
+ * container — o primeiro run do processo saía certo e os seguintes iam
+ * inflando. Guardando o ponto de partida, o que a tela mostra é o custo
+ * daquela execução.
+ */
+const inicioDeRequisicoes = new Map<string, number>();
+
 export async function abrirRun(mode: SyncMode, entity?: string): Promise<string> {
   const run = await prisma.syncRun.create({
     data: { mode, entity: entity ?? null, ownerId: PROCESS_ID, heartbeatAt: new Date() },
   });
+  inicioDeRequisicoes.set(run.id, requisicoesFeitas());
   return run.id;
+}
+
+/** Requisições consumidas por este run até agora. */
+function requisicoesDoRun(runId: string): number {
+  return requisicoesFeitas() - (inicioDeRequisicoes.get(runId) ?? 0);
 }
 
 export async function fecharRun(
@@ -59,16 +76,43 @@ export async function fecharRun(
       finishedAt: new Date(),
       recordsRead: totais.lidos,
       recordsWrote: totais.gravados,
-      requestsMade: requisicoesFeitas(),
+      requestsMade: requisicoesDoRun(runId),
       error: erro ?? null,
     },
   });
+  inicioDeRequisicoes.delete(runId);
 }
 
-export function iniciarHeartbeat(runId: string): NodeJS.Timeout {
+/**
+ * Batida de vida do run — e, com `progresso`, também o progresso parcial.
+ *
+ * ⚠ Sem o progresso parcial, um run RUNNING mostrava **0 lidos, 0 gravados, 0
+ * req.** na tela: os contadores só eram escritos no fecho. Uma execução de 8,5
+ * minutos passava esse tempo todo parecendo não ter feito nada — a mesma
+ * confusão de "parece parado" que a tela de progresso já tinha, um nível
+ * abaixo. Como a batida já escreve no banco a cada 30s, levar os números junto
+ * não custa consulta nenhuma a mais.
+ */
+export function iniciarHeartbeat(
+  runId: string,
+  progresso?: () => TotaisDoRun,
+): NodeJS.Timeout {
   const t = setInterval(() => {
+    const p = progresso?.();
     prisma.syncRun
-      .update({ where: { id: runId }, data: { heartbeatAt: new Date() } })
+      .update({
+        where: { id: runId },
+        data: {
+          heartbeatAt: new Date(),
+          ...(p
+            ? {
+                recordsRead: p.lidos,
+                recordsWrote: p.gravados,
+                requestsMade: requisicoesDoRun(runId),
+              }
+            : {}),
+        },
+      })
       .catch(() => {});
   }, HEARTBEAT_MS);
   // Não segurar o processo aberto só por causa do heartbeat.
@@ -83,6 +127,16 @@ export function iniciarHeartbeat(runId: string): NodeJS.Timeout {
  * falho no boot, o que só está correto sob a premissa "um container só" — com
  * duas réplicas, o boot da segunda mata o backfill vivo da primeira. Ver
  * ADR-0003.
+ *
+ * ⚠ **Precisa rodar PERIODICAMENTE, não só no boot.** Rodando apenas no boot,
+ * a varredura acontecia no único instante em que não podia funcionar: o
+ * container morre no redeploy com o heartbeat recém-batido, o processo novo
+ * sobe segundos depois e vê uma batida de 10s atrás — dentro do limite de 90s,
+ * logo "vivo". Nunca mais varria, e o run ficava RUNNING para sempre.
+ *
+ * Observado em produção: dois runs presos em RUNNING desde 19:00 depois de
+ * três redeploys seguidos, enquanto o run de verdade rodava ao lado. Uma tela
+ * com três execuções "em andamento" simultâneas não diz nada a ninguém.
  */
 export async function enterrarZumbis(): Promise<number> {
   const limite = new Date(Date.now() - HEARTBEAT_MS * 3);

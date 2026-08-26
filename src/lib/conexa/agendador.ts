@@ -2,6 +2,7 @@ import "server-only";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { cargaHistorica, sincronizarIncremental } from "./sync-janelas";
 import { syncDimensoes } from "./sync";
+import { enterrarZumbis } from "./run";
 import { consolidarTudo } from "@/lib/intel/consolidar";
 import { prisma } from "@/lib/db";
 
@@ -112,6 +113,27 @@ function tarefas(): Tarefa[] {
       intervaloMs: 30 * MINUTO,
       ligada: () => env.INTEL_SCHEDULER === "on",
       executar: () => consolidarTudo(),
+    },
+    {
+      /**
+       * Enterro de zumbis, periódico.
+       *
+       * ⚠ Rodava só no boot — e o boot é justamente quando a varredura não
+       * funciona: o container morre no redeploy com o heartbeat recém-batido,
+       * o processo novo sobe segundos depois e a batida ainda está dentro dos
+       * 90s de tolerância. O run ficava RUNNING para sempre.
+       *
+       * Não consome requisição da API: é um UPDATE local. Sempre ligado, mesmo
+       * com os agendadores de carga desligados numa réplica extra — zumbi
+       * abandonado é sujeira em qualquer regime.
+       */
+      nome: "enterro de zumbis",
+      intervaloMs: 2 * MINUTO,
+      ligada: () => true,
+      executar: async () => {
+        const n = await enterrarZumbis();
+        return n > 0 ? { enterrados: n } : { pulado: "nenhum zumbi" };
+      },
     },
   ];
 }

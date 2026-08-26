@@ -265,7 +265,7 @@ export async function cargaHistorica(
   // "trabalhando" virava indistinguível de "morto" — exatamente o modo de falha
   // silencioso que o resto do projeto se esforça para tornar impossível.
   const runId = await abrirRun("backfill", alvos.join(","));
-  const hb = iniciarHeartbeat(runId);
+  const hb = iniciarHeartbeat(runId, () => ({ lidos: registros, gravados: registros }));
 
   try {
     for (const entidade of alvos) {
@@ -407,7 +407,7 @@ export async function sincronizarIncremental(
   // "os dados são de agora?" em regime, quando a carga histórica já terminou e
   // só o incremental segue rodando.
   const runId = await abrirRun("incremental", alvos.join(","));
-  const hb = iniciarHeartbeat(runId);
+  const hb = iniciarHeartbeat(runId, () => ({ lidos: registros, gravados: registros }));
 
   try {
     for (const entidade of alvos) {
