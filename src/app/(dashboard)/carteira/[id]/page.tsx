@@ -53,7 +53,7 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
       <div className="mb-7">
         <Link
           href="/carteira"
-          className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--tinta-3)] transition-colors hover:text-[var(--tinta)]"
+          className="inline-flex items-center gap-1.5 text-[13.5px] text-[var(--tinta-3)] transition-colors hover:text-[var(--tinta)]"
         >
           <ArrowLeft size={13} />
           Carteira
@@ -95,7 +95,7 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
             detalheProcedencia="Soma de cobranças por data de emissão"
           />
           <div className="cartao flex flex-col px-4 py-3.5">
-            <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--tinta-2)]">
+            <div className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--tinta-2)]">
               <Clock size={13.5} className="shrink-0 text-[var(--tinta-3)]" />
               Horas inclusas por mês
             </div>
@@ -110,7 +110,7 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
                 </span>
               )}
             </div>
-            <div className="mt-auto flex items-center gap-2 pt-3 text-[11.5px] text-[var(--tinta-3)]">
+            <div className="mt-auto flex items-center gap-2 pt-3 text-[12.5px] text-[var(--tinta-3)]">
               <Procedencia tipo="API" detalhe="plan.hourQuotas" />
               <span className="truncate">
                 {perfil?.horasInclusasMes == null && perfil?.temContratoAtivo

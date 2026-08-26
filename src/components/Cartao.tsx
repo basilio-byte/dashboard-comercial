@@ -24,7 +24,7 @@ export function Cabecalho({
       <div className="min-w-0">
         <h1 className="titulo-pagina">{titulo}</h1>
         {sub ? (
-          <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-[var(--tinta-2)]">{sub}</p>
+          <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-[var(--tinta-2)]">{sub}</p>
         ) : null}
       </div>
       {acao ? <div className="shrink-0">{acao}</div> : null}
@@ -51,7 +51,7 @@ export function Secao({
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
         <div>
           <h2 className="titulo-secao">{titulo}</h2>
-          {sub ? <p className="mt-1 text-[13px] text-[var(--tinta-2)]">{sub}</p> : null}
+          {sub ? <p className="mt-1 text-[14px] text-[var(--tinta-2)]">{sub}</p> : null}
         </div>
         {acao}
       </div>
@@ -102,7 +102,7 @@ export function Cartao({
 
   return (
     <div className={cn("cartao flex flex-col px-4 py-3.5", className)}>
-      <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--tinta-2)]">
+      <div className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--tinta-2)]">
         {Icone ? <Icone size={13.5} className="shrink-0 text-[var(--tinta-3)]" /> : null}
         {rotulo}
       </div>
@@ -116,7 +116,7 @@ export function Cartao({
         {confiavel ? valor : "não disponível"}
       </div>
 
-      <div className="mt-auto flex items-center gap-2 pt-3 text-[11.5px] text-[var(--tinta-3)]">
+      <div className="mt-auto flex items-center gap-2 pt-3 text-[12.5px] text-[var(--tinta-3)]">
         <Procedencia tipo={confiavel ? procedencia : "INDISPONIVEL"} detalhe={detalheProcedencia} />
         <span className="truncate">{confiavel ? contexto : "carga incompleta"}</span>
       </div>
@@ -177,13 +177,13 @@ export function Painel({
     <div className={cn("cartao overflow-hidden", className)}>
       {titulo ? (
         <div className="cartao-topo">
-          <div className="min-w-0 text-[13px] font-medium text-[var(--tinta-2)]">{titulo}</div>
+          <div className="min-w-0 text-[14px] font-medium text-[var(--tinta-2)]">{titulo}</div>
           {acao ? <div className="shrink-0">{acao}</div> : null}
         </div>
       ) : null}
       {children}
       {rodape ? (
-        <div className="border-t border-[var(--linha)] px-4 py-2.5 text-[12px] text-[var(--tinta-3)]">
+        <div className="border-t border-[var(--linha)] px-4 py-2.5 text-[13px] text-[var(--tinta-3)]">
           {rodape}
         </div>
       ) : null}
@@ -205,7 +205,7 @@ export function Vazio({ children, Icone }: { children: React.ReactNode; Icone?: 
           <Icone size={17} />
         </span>
       ) : null}
-      <div className="max-w-md text-[13.5px] leading-relaxed text-[var(--tinta-2)]">{children}</div>
+      <div className="max-w-md text-[14.5px] leading-relaxed text-[var(--tinta-2)]">{children}</div>
     </div>
   );
 }
@@ -213,6 +213,6 @@ export function Vazio({ children, Icone }: { children: React.ReactNode; Icone?: 
 /** Nota de rodapé de seção: a régua do número, em letra pequena. */
 export function Nota({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={cn("text-[12px] leading-relaxed text-[var(--tinta-3)]", className)}>{children}</p>
+    <p className={cn("text-[13px] leading-relaxed text-[var(--tinta-3)]", className)}>{children}</p>
   );
 }

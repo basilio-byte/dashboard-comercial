@@ -17,7 +17,7 @@ export async function SecaoValidacao() {
     <div className="space-y-4">
       <div>
         <h2 className="text-[17px] font-semibold tracking-tight">Validação do saldo de horas</h2>
-        <p className="mt-1 max-w-3xl text-[13.5px] leading-relaxed text-[var(--tinta-2)]">
+        <p className="mt-1 max-w-3xl text-[14.5px] leading-relaxed text-[var(--tinta-2)]">
           O saldo é <strong className="font-semibold text-[var(--tinta)]">derivado</strong> (cota do
           plano menos as horas que o Conexa marcou como abatidas), com o ciclo ancorado na data de
           contratação. Esta tela existe para conferir esse número contra a tela do Conexa, cliente
@@ -151,13 +151,13 @@ function Instrucao({
       <div className="flex items-center gap-2">
         <span
           aria-hidden
-          className="num flex h-5 w-5 items-center justify-center rounded-full bg-[var(--acento-wash)] text-[11px] font-semibold text-[var(--acento-tinta)]"
+          className="num flex h-5 w-5 items-center justify-center rounded-full bg-[var(--acento-wash)] text-[12px] font-semibold text-[var(--acento-tinta)]"
         >
           {n}
         </span>
-        <span className="text-[13px] font-semibold">{titulo}</span>
+        <span className="text-[14px] font-semibold">{titulo}</span>
       </div>
-      <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">{children}</p>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-[var(--tinta-2)]">{children}</p>
     </div>
   );
 }

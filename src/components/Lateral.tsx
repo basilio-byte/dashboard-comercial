@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Radar, Users, Zap, ShieldCheck, Cog, LogOut, type LucideIcon } from "lucide-react";
 import { sair } from "@/lib/auth/actions";
 import { cn, iniciais } from "@/lib/ui";
+import { Assinatura } from "./Logo";
 
 /**
  * Navegação lateral.
@@ -67,17 +68,10 @@ export function Lateral({
       <Link
         href="/"
         onClick={aoNavegar}
-        className="flex items-center gap-2.5 px-5 py-5 transition-opacity hover:opacity-90"
+        aria-label="Seahub Comercial — ir para o Radar"
+        className="px-5 py-5 transition-opacity hover:opacity-90"
       >
-        <Marca />
-        <span className="flex flex-col leading-none">
-          <span className="text-[15px] font-semibold tracking-tight text-[var(--marca-tinta)]">
-            Seahub
-          </span>
-          <span className="mt-1 text-[9.5px] font-medium uppercase tracking-[0.2em] text-[var(--marca-tinta-3)]">
-            comercial
-          </span>
-        </span>
+        <Assinatura altura={24} />
       </Link>
 
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-4">
@@ -96,7 +90,7 @@ export function Lateral({
                       onClick={aoNavegar}
                       aria-current={ativo ? "page" : undefined}
                       className={cn(
-                        "relative flex h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[13.5px] transition-colors",
+                        "relative flex h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[14.5px] transition-colors",
                         ativo
                           ? "bg-[var(--marca-ativo)] font-semibold text-[var(--marca-tinta)]"
                           : "font-medium text-[var(--marca-tinta-2)] hover:bg-[var(--marca-hover)] hover:text-[var(--marca-tinta)]",
@@ -123,32 +117,6 @@ export function Lateral({
 
       <Rodape nome={nome} email={email} aoNavegar={aoNavegar} caminho={caminho} />
     </nav>
-  );
-}
-
-/** Marca gráfica: as duas ondas do nome, reduzidas a um sinal. */
-function Marca() {
-  return (
-    <span
-      aria-hidden
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-[var(--acento)] shadow-[inset_0_1px_0_rgba(255,255,255,.25)]"
-    >
-      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" aria-hidden>
-        <path
-          d="M3 12.5c1.6-2 3.2-2 4.8 0s3.2 2 4.8 0 3.2-2 4.4-.4"
-          stroke="#fff"
-          strokeWidth="1.9"
-          strokeLinecap="round"
-        />
-        <path
-          d="M3 7.5c1.6-2 3.2-2 4.8 0s3.2 2 4.8 0 3.2-2 4.4-.4"
-          stroke="#fff"
-          strokeOpacity=".55"
-          strokeWidth="1.9"
-          strokeLinecap="round"
-        />
-      </svg>
-    </span>
   );
 }
 
@@ -191,7 +159,7 @@ function Rodape({
             {iniciais(nome)}
           </span>
           <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-[12.5px] font-medium text-[var(--marca-tinta)]">
+            <span className="block truncate text-[13.5px] font-medium text-[var(--marca-tinta)]">
               {nome}
             </span>
             {email ? (

@@ -40,7 +40,7 @@ export async function SerieMensalDaCarteira() {
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight">Receita mês a mês</h2>
-          <p className="mt-1 max-w-2xl text-[13px] text-[var(--tinta-2)]">
+          <p className="mt-1 max-w-2xl text-[14px] text-[var(--tinta-2)]">
             Regime de <strong className="font-semibold text-[var(--tinta)]">emissão</strong>, valor
             com juros e multa. Canceladas e negociadas fora. Mesma régua do Dashboard Financeiro.
           </p>
@@ -49,7 +49,7 @@ export async function SerieMensalDaCarteira() {
             tile de largura inteira só para repetir uma soma era desperdício de
             uma faixa da tela. */}
         <div className="text-right">
-          <div className="text-[11.5px] text-[var(--tinta-3)]">12 meses fechados</div>
+          <div className="text-[12.5px] text-[var(--tinta-3)]">12 meses fechados</div>
           <div className="num mt-0.5 text-[22px] font-semibold leading-none tracking-[-0.02em]">
             <ValorOuLacuna valor={formatBRL(totalFechado)} confiavel={espelho.receitaConfiavel} />
           </div>

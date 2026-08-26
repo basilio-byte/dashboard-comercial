@@ -15,6 +15,33 @@ export function nowInAppTz(): Date {
   return toZonedTime(new Date(), APP_TZ);
 }
 
+/**
+ * Hora de um INSTANTE, no relógio de parede da empresa.
+ *
+ * ⚠ `Intl.DateTimeFormat` sem `timeZone` usa o fuso do PROCESSO. No container
+ * o processo roda em UTC, então a última sincronização das 17h30 de Natal
+ * aparecia como "sincronizado 20:30" — três horas no futuro em relação ao
+ * relógio de quem estava olhando a tela. Um painel que diz a hora errada da
+ * própria carga destrói a única coisa que ele promete: saber se o dado é de
+ * agora.
+ *
+ * ⚠ Recebe INSTANTE cru do banco (`finishedAt`, `startedAt`), nunca a saída de
+ * `nowInAppTz()` — aquela já vem deslocada, e formatá-la com fuso desloca de
+ * novo.
+ */
+export function horaLocal(d: Date): string {
+  return new Intl.DateTimeFormat("pt-BR", { timeStyle: "short", timeZone: APP_TZ }).format(d);
+}
+
+/** Data e hora de um INSTANTE, no relógio de parede da empresa. */
+export function dataHoraLocal(d: Date): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: APP_TZ,
+  }).format(d);
+}
+
 /** 'yyyy-MM-dd' de uma data-calendário. */
 export function dateKey(d: Date): string {
   return format(d, "yyyy-MM-dd");

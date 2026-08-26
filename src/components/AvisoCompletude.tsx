@@ -27,7 +27,7 @@ export function AvisoCompletude({ estado }: { estado: EstadoEspelho }) {
           sem faturamento&quot;.
         </p>
       ) : null}
-      <p className="mt-1.5 text-[12.5px] text-[var(--tinta-3)]">
+      <p className="mt-1.5 text-[13.5px] text-[var(--tinta-3)]">
         Continue a carga em{" "}
         <Link href="/motor" className="font-medium text-[var(--acento-tinta)] hover:underline">
           Motor

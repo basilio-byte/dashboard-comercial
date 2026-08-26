@@ -40,7 +40,7 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-[12.5px]">
+        <label className="text-[13.5px]">
           <span className="block text-[var(--tinta-2)]">Mês fechado</span>
           <select
             value={mes}
@@ -70,7 +70,7 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
       {r && v ? (
         <div className={cn("cartao overflow-hidden")}>
           <div className={cn("cartao-topo !border-b-0", v.classe)}>
-            <div className="flex items-center gap-2 text-[14px] font-semibold">
+            <div className="flex items-center gap-2 text-[15px] font-semibold">
               <v.Icone size={16} className="faixa-icone" aria-hidden />
               {rotuloMes(r.mesKey)} — {v.rotulo}
             </div>
@@ -79,7 +79,7 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
 
           <div className="space-y-3 px-4 py-3.5">
             {r.observacao ? (
-              <p className="text-[13px] leading-relaxed text-[var(--tinta-2)]">{r.observacao}</p>
+              <p className="text-[14px] leading-relaxed text-[var(--tinta-2)]">{r.observacao}</p>
             ) : null}
 
             <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
@@ -94,10 +94,10 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
 
             {r.divergencias.length ? (
               <div className="border-t border-[var(--linha)] pt-3">
-                <p className="text-[12.5px] font-semibold">
+                <p className="text-[13.5px] font-semibold">
                   Divergências{r.divergencias.length >= 50 ? " (até 50)" : ""}
                 </p>
-                <ul className="mt-1.5 space-y-1 text-[11.5px] leading-relaxed text-[var(--tinta-2)]">
+                <ul className="mt-1.5 space-y-1 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">
                   {r.divergencias.map((d) => (
                     <li key={`${d.chargeId}-${d.motivo}`}>
                       cobrança{" "}
@@ -130,7 +130,7 @@ function Par({
 }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{t}</dt>
+      <dt className="text-[12px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{t}</dt>
       <dd
         className={cn(
           "num mt-0.5 text-[16px] font-semibold tracking-[-0.01em]",
@@ -139,7 +139,7 @@ function Par({
       >
         {v}
       </dd>
-      {sub ? <dd className="text-[11.5px] text-[var(--tinta-3)]">{sub}</dd> : null}
+      {sub ? <dd className="text-[12.5px] text-[var(--tinta-3)]">{sub}</dd> : null}
     </div>
   );
 }

@@ -42,11 +42,11 @@ export function PainelOperacao() {
   return (
     <section className="cartao overflow-hidden">
       <div className="cartao-topo">
-        <div className="text-[13px] font-medium text-[var(--tinta-2)]">Ações</div>
+        <div className="text-[14px] font-medium text-[var(--tinta-2)]">Ações</div>
       </div>
 
       <div className="px-4 py-4">
-        <p className="max-w-3xl text-[12.5px] leading-relaxed text-[var(--tinta-3)]">
+        <p className="max-w-3xl text-[13.5px] leading-relaxed text-[var(--tinta-3)]">
           Na ordem: cadastros primeiro (tudo depende deles), depois a carga, depois a consolidação.
           A carga é feita <strong className="font-semibold text-[var(--tinta-2)]">por janela
           mensal</strong>, da mais recente para a mais antiga, com teto por execução — rodar de novo
@@ -80,19 +80,19 @@ export function PainelOperacao() {
         </div>
 
         {rodando ? (
-          <p className="mt-3 text-[12.5px] text-[var(--tinta-3)]">{rodando}: em andamento…</p>
+          <p className="mt-3 text-[13.5px] text-[var(--tinta-3)]">{rodando}: em andamento…</p>
         ) : null}
 
         {saida ? (
           <div className="mt-3">
             <div
-              className={`text-[12px] font-medium ${
+              className={`text-[13px] font-medium ${
                 saida.erro ? "text-[var(--critico-tinta)]" : "text-[var(--bom-tinta)]"
               }`}
             >
               {saida.rotulo}: {saida.erro ? "erro" : "concluído"}
             </div>
-            <pre className="mt-1.5 max-h-64 overflow-auto rounded-[var(--raio-sm)] border border-[var(--borda)] bg-[var(--superficie-sutil)] p-3 text-[11.5px] leading-relaxed text-[var(--tinta-2)]">
+            <pre className="mt-1.5 max-h-64 overflow-auto rounded-[var(--raio-sm)] border border-[var(--borda)] bg-[var(--superficie-sutil)] p-3 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">
               {saida.texto}
             </pre>
           </div>

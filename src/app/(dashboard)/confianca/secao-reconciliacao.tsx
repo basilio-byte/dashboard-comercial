@@ -11,12 +11,12 @@ export async function SecaoReconciliacao() {
     <div className="space-y-4">
       <div>
         <h2 className="text-[17px] font-semibold tracking-tight">Reconciliação das cobranças</h2>
-        <p className="mt-1 max-w-3xl text-[13.5px] leading-relaxed text-[var(--tinta-2)]">
+        <p className="mt-1 max-w-3xl text-[14.5px] leading-relaxed text-[var(--tinta-2)]">
           Confere o espelho local contra o Conexa, cobrança por cobrança, num mês fechado.
         </p>
       </div>
 
-      <div className="cartao space-y-2.5 px-4 py-3.5 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">
+      <div className="cartao space-y-2.5 px-4 py-3.5 text-[13.5px] leading-relaxed text-[var(--tinta-2)]">
         <p>
           <strong className="font-semibold text-[var(--tinta)]">Critério:</strong> diferença de{" "}
           <strong className="font-semibold text-[var(--tinta)]">R$ 0,00</strong> e contagem

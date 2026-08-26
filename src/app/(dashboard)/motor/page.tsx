@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { usuarioAtual } from "@/lib/auth/session";
 import { progressoDaCarga } from "@/lib/conexa/sync-janelas";
+import { dataHoraLocal } from "@/lib/dates";
 import { PainelOperacao } from "./painel";
 import { Cabecalho, Faixa, Nota, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
@@ -107,7 +108,7 @@ export default async function Motor() {
                             {completa ? (
                               <span className="selo selo-bom">completa</span>
                             ) : (
-                              <span className="num text-[11.5px] text-[var(--tinta-3)]">
+                              <span className="num text-[12.5px] text-[var(--tinta-3)]">
                                 {p.total ? `${largura}%` : "—"}
                               </span>
                             )}
@@ -169,16 +170,13 @@ export default async function Motor() {
                     {runs.map((r) => (
                       <tr key={r.id}>
                         <td className="num whitespace-nowrap text-[var(--tinta-2)]">
-                          {new Intl.DateTimeFormat("pt-BR", {
-                            dateStyle: "short",
-                            timeStyle: "short",
-                          }).format(r.startedAt)}
+                          {dataHoraLocal(r.startedAt)}
                         </td>
                         <td className="text-[var(--tinta-2)]">{r.mode}</td>
                         <td>
                           <Estado status={r.status} />
                           {r.error ? (
-                            <div className="mt-1 max-w-md text-[11.5px] leading-relaxed text-[var(--critico-tinta)]">
+                            <div className="mt-1 max-w-md text-[12.5px] leading-relaxed text-[var(--critico-tinta)]">
                               {r.error}
                             </div>
                           ) : null}
@@ -225,7 +223,7 @@ export default async function Motor() {
 function Contador({ rotulo, n }: { rotulo: string; n: number }) {
   return (
     <div className="cartao px-3.5 py-3">
-      <div className="text-[12px] text-[var(--tinta-2)]">{rotulo}</div>
+      <div className="text-[13px] text-[var(--tinta-2)]">{rotulo}</div>
       <div
         className={cn(
           "num mt-1.5 text-[21px] font-semibold leading-none tracking-[-0.02em]",
@@ -241,8 +239,8 @@ function Contador({ rotulo, n }: { rotulo: string; n: number }) {
 function Item({ termo, valor }: { termo: string; valor: string }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{termo}</dt>
-      <dd className="mt-0.5 text-[13.5px] font-medium">{valor}</dd>
+      <dt className="text-[12px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{termo}</dt>
+      <dd className="mt-0.5 text-[14.5px] font-medium">{valor}</dd>
     </div>
   );
 }

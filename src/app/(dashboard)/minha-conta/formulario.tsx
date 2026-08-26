@@ -43,13 +43,13 @@ function Campo({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[12.5px] font-medium text-[var(--tinta-2)]">{rotulo}</span>
+      <span className="mb-1 block text-[13.5px] font-medium text-[var(--tinta-2)]">{rotulo}</span>
       <input
         name={nome}
         type="password"
         autoComplete={autoComplete}
         required
-        className="campo !py-2.5 !text-[14px]"
+        className="campo !py-2.5 !text-[15px]"
       />
     </label>
   );

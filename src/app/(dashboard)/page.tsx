@@ -226,22 +226,22 @@ async function TopClientes({
 
   return (
     <div className="cartao flex flex-col px-4 py-3.5 sm:col-span-2 lg:col-span-1">
-      <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--tinta-2)]">
+      <div className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--tinta-2)]">
         <Trophy size={13.5} className="shrink-0 text-[var(--tinta-3)]" />
         Top 5 do ano
       </div>
       {!confiavel ? (
-        <p className="mt-2 text-[13px] leading-relaxed text-[var(--tinta-3)]">
+        <p className="mt-2 text-[14px] leading-relaxed text-[var(--tinta-3)]">
           Indisponível: um ranking sobre carga parcial aponta o cliente errado.
         </p>
       ) : top.length === 0 ? (
-        <p className="mt-2 text-[13px] text-[var(--tinta-3)]">Nenhum cliente com receita.</p>
+        <p className="mt-2 text-[14px] text-[var(--tinta-3)]">Nenhum cliente com receita.</p>
       ) : (
         <ol className="mt-2.5 space-y-1.5">
           {top.map((c, i) => {
             const share = participacao(c.receita, total);
             return (
-              <li key={c.customerConexaId} className="flex items-center gap-2 text-[12.5px]">
+              <li key={c.customerConexaId} className="flex items-center gap-2 text-[13.5px]">
                 <span className="num w-3 shrink-0 text-[var(--tinta-3)]">{i + 1}</span>
                 <Link
                   href={`/carteira/${c.customerConexaId}`}

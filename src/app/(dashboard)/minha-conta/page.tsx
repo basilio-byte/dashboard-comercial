@@ -17,20 +17,20 @@ export default async function MinhaConta() {
         <div className="cartao flex items-center gap-3.5 px-4 py-4">
           <span
             aria-hidden
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--acento-wash)] text-[14px] font-semibold text-[var(--acento-tinta)]"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--acento-wash)] text-[15px] font-semibold text-[var(--acento-tinta)]"
           >
             {iniciais(usuario.name)}
           </span>
           <div className="min-w-0">
-            <div className="truncate text-[15px] font-semibold">{usuario.name}</div>
-            <div className="truncate text-[13px] text-[var(--tinta-2)]">{usuario.email}</div>
+            <div className="truncate text-[16px] font-semibold">{usuario.name}</div>
+            <div className="truncate text-[14px] text-[var(--tinta-2)]">{usuario.email}</div>
           </div>
           <span className="selo ml-auto">{usuario.role === "ADMIN" ? "admin" : "leitura"}</span>
         </div>
 
         <div className="cartao px-5 py-4">
-          <h2 className="text-[14.5px] font-semibold">Trocar senha</h2>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">
+          <h2 className="text-[15.5px] font-semibold">Trocar senha</h2>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-[var(--tinta-2)]">
             Trocar a senha encerra as <strong className="font-semibold text-[var(--tinta)]">outras</strong>{" "}
             sessões deste usuário — a atual continua. Se a senha vazou, é isso que resolve.
           </p>

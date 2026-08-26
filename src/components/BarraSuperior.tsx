@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { horaLocal } from "@/lib/dates";
 import { MenuMovel } from "./MenuMovel";
+import { Logo } from "./Logo";
 import { cn } from "@/lib/ui";
 
 /**
@@ -22,12 +24,10 @@ export async function BarraSuperior({ nome, email }: { nome: string; email?: str
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--borda)] bg-[color-mix(in_oklab,var(--plano)_86%,transparent)] px-4 backdrop-blur-md sm:px-6">
       <MenuMovel nome={nome} email={email} />
 
-      {/* No celular não há lateral visível: a marca precisa aparecer aqui. */}
-      <Link href="/" className="flex items-baseline gap-1.5 md:hidden">
-        <span className="text-[14px] font-semibold tracking-tight">Seahub</span>
-        <span className="text-[9.5px] font-medium uppercase tracking-[0.18em] text-[var(--tinta-3)]">
-          comercial
-        </span>
+      {/* No celular não há lateral visível: a marca precisa aparecer aqui — e
+          sobre superfície clara, então o logotipo branco inverte. */}
+      <Link href="/" aria-label="Seahub Comercial" className="md:hidden">
+        <Logo altura={19} tom="tinta" />
       </Link>
 
       <div className="ml-auto">
@@ -55,7 +55,7 @@ function SeloSincronizacao({ em }: { em: Date | null }) {
 
   const horas = (Date.now() - em.getTime()) / 3_600_000;
   const velho = horas > 2;
-  const hora = new Intl.DateTimeFormat("pt-BR", { timeStyle: "short" }).format(em);
+  const hora = horaLocal(em);
 
   return (
     <Link

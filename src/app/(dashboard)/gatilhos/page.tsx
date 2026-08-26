@@ -193,7 +193,7 @@ export default async function Gatilhos() {
             const n = contagem(e);
             return (
               <div key={e} className="cartao px-3.5 py-3">
-                <div className="flex items-center gap-1.5 text-[12px] text-[var(--tinta-2)]">
+                <div className="flex items-center gap-1.5 text-[13px] text-[var(--tinta-2)]">
                   <span className={cn("selo h-5 w-5 justify-center p-0", classeSelo)}>
                     <Icone size={12} />
                   </span>
@@ -236,7 +236,7 @@ export default async function Gatilhos() {
                   />
 
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    <span className="text-[14.5px] font-semibold">{g.nome}</span>
+                    <span className="text-[15.5px] font-semibold">{g.nome}</span>
                     <span className="selo">
                       {g.n ? `regra ${g.n}` : "pedido do responsável"}
                     </span>
@@ -246,7 +246,7 @@ export default async function Gatilhos() {
                     </span>
                   </div>
 
-                  <div className="mt-2 grid gap-x-8 gap-y-1 text-[13px] sm:grid-cols-2">
+                  <div className="mt-2 grid gap-x-8 gap-y-1 text-[14px] sm:grid-cols-2">
                     <div className="text-[var(--tinta-2)]">
                       <span className="text-[var(--tinta-3)]">quando: </span>
                       {g.condicao}
@@ -257,7 +257,7 @@ export default async function Gatilhos() {
                     </div>
                   </div>
 
-                  <p className="mt-2 text-[12px] leading-relaxed text-[var(--tinta-3)]">{g.nota}</p>
+                  <p className="mt-2 text-[13px] leading-relaxed text-[var(--tinta-3)]">{g.nota}</p>
                 </div>
               );
             })}

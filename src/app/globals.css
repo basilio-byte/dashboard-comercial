@@ -29,10 +29,15 @@
   --superficie-sutil: #f2f1ed;
   --elevada: #ffffff;
 
-  /* ── Tinta ── */
+  /* ── Tinta ──────────────────────────────────────────────────────────
+     ⚠ `--tinta-3` é mais escuro que o passo "muted" da paleta de referência
+     (#898781). Aquele passo foi medido para rótulo de eixo de gráfico, não
+     para texto corrido de 12px: em tela, o conjunto lia apagado. Mexer aqui é
+     seguro porque só AUMENTA o contraste contra a superfície — as cores de
+     série e de estado, que passam por validação, seguem intactas. */
   --tinta: #0b0b0b;
-  --tinta-2: #52514e;
-  --tinta-3: #898781;
+  --tinta-2: #4a4946;
+  --tinta-3: #6e6c66;
 
   /* ── Traços ── */
   --borda: rgba(11, 11, 11, 0.1);
@@ -107,9 +112,12 @@
     --superficie-sutil: #232322;
     --elevada: #232322;
 
+    /* No escuro o texto fino "some" mais rápido que no claro: o mesmo passo
+       de cinza rende menos peso percebido sobre fundo preto. Daí os dois
+       degraus subirem em vez de espelharem os do modo claro. */
     --tinta: #ffffff;
-    --tinta-2: #c3c2b7;
-    --tinta-3: #898781;
+    --tinta-2: #d5d4cb;
+    --tinta-3: #a5a39b;
 
     --borda: rgba(255, 255, 255, 0.1);
     --borda-forte: rgba(255, 255, 255, 0.18);
@@ -169,8 +177,21 @@
     background: var(--plano);
     color: var(--tinta);
     font-family: var(--fonte);
+    /* ⚠ 430, não 400. A Inter variável em 400 renderiza fina demais em texto
+       pequeno no Windows, e era metade da queixa de "texto fraco" — a outra
+       metade era tamanho. Como a fonte é variável, 430 não troca de arquivo
+       nem muda a métrica: só engrossa o traço. */
+    font-weight: 430;
+    font-size: 15px;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  strong,
+  b {
+    font-weight: 640;
   }
 
   /* Colunas de números alinham; o resto não. */
@@ -237,9 +258,9 @@
     border-radius: var(--raio);
     border: 1px solid var(--borda);
     background: var(--superficie);
-    padding: 0.875rem 1rem;
-    font-size: 0.875rem;
-    line-height: 1.55;
+    padding: 0.9375rem 1.0625rem;
+    font-size: 0.9375rem;
+    line-height: 1.6;
     color: var(--tinta-2);
     box-shadow: var(--sombra-1);
   }
@@ -282,17 +303,17 @@
 
   /* ── Tipografia de seção ── */
   .titulo-secao {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.07em;
+    font-size: 0.75rem;
+    font-weight: 660;
+    letter-spacing: 0.075em;
     text-transform: uppercase;
-    color: var(--tinta-3);
+    color: var(--tinta-2);
   }
   .titulo-pagina {
-    font-size: 1.6875rem;
-    font-weight: 640;
-    letter-spacing: -0.022em;
-    line-height: 1.15;
+    font-size: 1.8125rem;
+    font-weight: 660;
+    letter-spacing: -0.024em;
+    line-height: 1.12;
   }
 
   /* ── Selo ─────────────────────────────────────────────────────────── */
@@ -303,10 +324,10 @@
     border-radius: 999px;
     border: 1px solid var(--borda);
     background: var(--superficie-sutil);
-    padding: 0.125rem 0.5rem;
-    font-size: 0.6875rem;
-    font-weight: 550;
-    line-height: 1.5;
+    padding: 0.1875rem 0.5625rem;
+    font-size: 0.75rem;
+    font-weight: 580;
+    line-height: 1.45;
     white-space: nowrap;
     color: var(--tinta-2);
   }
@@ -340,9 +361,9 @@
     border-radius: var(--raio-sm);
     border: 1px solid var(--borda);
     background: var(--superficie);
-    padding: 0.4375rem 0.75rem;
-    font-size: 0.8125rem;
-    font-weight: 550;
+    padding: 0.5rem 0.8125rem;
+    font-size: 0.875rem;
+    font-weight: 570;
     color: var(--tinta);
     box-shadow: var(--sombra-1);
     transition:
@@ -385,8 +406,8 @@
     border-radius: var(--raio-sm);
     border: 1px solid var(--borda);
     background: var(--superficie);
-    padding: 0.4375rem 0.75rem;
-    font-size: 0.8125rem;
+    padding: 0.5rem 0.8125rem;
+    font-size: 0.875rem;
     color: var(--tinta);
     box-shadow: var(--sombra-1);
     transition:
@@ -403,7 +424,7 @@
   /* ── Tabela ───────────────────────────────────────────────────────── */
   .tabela {
     width: 100%;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     border-collapse: collapse;
     /* ⚠ Sem largura mínima, no celular a tabela se ESPREME em vez de rolar: as
        colunas de texto viram uma pilha de uma palavra por linha e as da direita
@@ -416,18 +437,18 @@
     top: 0;
     z-index: 1;
     text-align: left;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    font-weight: 640;
+    letter-spacing: 0.045em;
     text-transform: uppercase;
-    color: var(--tinta-3);
+    color: var(--tinta-2);
     background: var(--superficie);
-    padding: 0.5rem 0.875rem;
+    padding: 0.5625rem 0.875rem;
     border-bottom: 1px solid var(--linha);
     white-space: nowrap;
   }
   .tabela tbody td {
-    padding: 0.625rem 0.875rem;
+    padding: 0.6875rem 0.875rem;
     border-bottom: 1px solid var(--linha);
     color: var(--tinta);
     vertical-align: middle;
@@ -468,5 +489,17 @@
   .divisor {
     border: 0;
     border-top: 1px solid var(--linha);
+  }
+
+  /* O logotipo oficial é BRANCO sobre transparente. Em superfície clara ele
+     sumiria, então inverte — e volta ao original no escuro. Só existe uma
+     variante do arquivo; inverter é preferível a redesenhar a marca. */
+  .logo-tinta {
+    filter: invert(1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .logo-tinta {
+      filter: none;
+    }
   }
 }

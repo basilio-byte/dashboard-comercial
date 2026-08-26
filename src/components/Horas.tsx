@@ -109,7 +109,7 @@ function BlocoContrato({ contrato }: { contrato: HorasDoContrato }) {
       </div>
 
       {contrato.fechados.some((c) => !c.conclusivo) ? (
-        <div className="flex gap-2.5 border-b border-[var(--linha)] bg-[var(--wash-atencao)] px-4 py-2.5 text-[12.5px] leading-relaxed text-[var(--tinta-2)]">
+        <div className="flex gap-2.5 border-b border-[var(--linha)] bg-[var(--wash-atencao)] px-4 py-2.5 text-[13.5px] leading-relaxed text-[var(--tinta-2)]">
           <span className="mt-px text-[var(--atencao-tinta)]" aria-hidden>
             ⚠
           </span>
@@ -123,7 +123,7 @@ function BlocoContrato({ contrato }: { contrato: HorasDoContrato }) {
       ) : null}
 
       {linhas.length === 0 ? (
-        <p className="px-4 py-4 text-[13px] text-[var(--tinta-3)]">Nenhum ciclo fechado ainda.</p>
+        <p className="px-4 py-4 text-[14px] text-[var(--tinta-3)]">Nenhum ciclo fechado ainda.</p>
       ) : (
         <TabelaCiclos linhas={linhas} temAtual={contrato.cicloAtual !== null} semCota={semCota} />
       )}
@@ -134,8 +134,8 @@ function BlocoContrato({ contrato }: { contrato: HorasDoContrato }) {
 function Campo({ rotulo, valor }: { rotulo: string; valor: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{rotulo}</div>
-      <div className="mt-0.5 text-[13.5px] font-medium">{valor}</div>
+      <div className="text-[12px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{rotulo}</div>
+      <div className="mt-0.5 text-[14.5px] font-medium">{valor}</div>
     </div>
   );
 }
