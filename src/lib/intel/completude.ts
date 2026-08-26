@@ -1,7 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { currentMonthKey } from "@/lib/dates";
-import { gerarJanelas } from "@/lib/conexa/janelas";
+import { janelasDoPeriodo } from "@/lib/conexa/sync-janelas";
 
 /**
  * SELO DE COMPLETUDE (ADR-0011).
@@ -75,13 +74,27 @@ export async function estadoDoEspelho(): Promise<EstadoEspelho> {
   for (const entidade of ENTIDADES) {
     const registros = await CONTADOR[entidade]();
     const minhas = janelas.filter((j) => j.entidade === entidade);
-    const concluidas = minhas.filter((j) => j.status === "CONCLUIDA").length;
     const fundo = fundoPor.get(entidade);
     // Sem o FUNDO do histórico encontrado, não se sabe quantas janelas existem —
     // e "desconhecido" nunca é "completo". A versão anterior derivava o total de
     // uma janela inicial descoberta lendo `offset: 0`, premissa que a medição
     // derrubou: a API não devolve os registros em ordem.
-    const totais = fundo ? gerarJanelas(fundo, currentMonthKey()).length : 0;
+    const doPeriodo = janelasDoPeriodo(fundo ?? null);
+    const totais = doPeriodo?.size ?? 0;
+
+    /**
+     * ⚠ Conta só as janelas DO PERÍODO.
+     *
+     * Contava todas as CONCLUIDA da entidade, e para entidade mutável isso
+     * inclui a janela do mês SEGUINTE que o incremental cria. O resultado era
+     * um selo que podia mentir: com uma janela histórica pendente e a futura
+     * concluída, `concluidas >= totais` fechava e a entidade era declarada
+     * completa — liberando receita e fila para virarem "fato" sobre dado
+     * incompleto. É exatamente o que este arquivo inteiro existe para impedir.
+     */
+    const concluidas = minhas.filter(
+      (j) => j.status === "CONCLUIDA" && (!doPeriodo || doPeriodo.has(j.janela)),
+    ).length;
 
     entidades.push({
       entidade,

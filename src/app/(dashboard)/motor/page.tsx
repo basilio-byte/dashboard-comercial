@@ -85,7 +85,11 @@ export default async function Motor() {
                 A carga anda do mês corrente para trás e só declara o fundo depois de seis janelas
                 vazias seguidas — porque a API <strong>não devolve os registros em ordem</strong>,
                 então não dá para perguntar &quot;qual é o mais antigo&quot;. Enquanto o fundo não é
-                alcançado, o total aparece como <strong>?</strong>: desconhecido nunca é completo.
+                alcançado, o total aparece como <strong>?</strong>: desconhecido nunca é completo.{" "}
+                <strong>Lidos da API</strong> é maior que <strong>linhas no espelho</strong> por
+                projeto: a paginação instável do Conexa devolve o mesmo registro em páginas
+                diferentes, e o upsert colapsa. A coluna da direita é a que bate com os cartões do
+                topo.
               </>
             }
           >
@@ -96,7 +100,8 @@ export default async function Motor() {
                     <th>Entidade</th>
                     <th className="w-[38%]">Progresso</th>
                     <th className="text-right">Janelas</th>
-                    <th className="text-right">Registros</th>
+                    <th className="text-right">Lidos da API</th>
+                    <th className="text-right">Linhas no espelho</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -135,7 +140,15 @@ export default async function Motor() {
                             `${p.concluidas}/${p.total}`
                           )}
                         </td>
-                        <td className="num text-right">{p.registros.toLocaleString("pt-BR")}</td>
+                        <td
+                          className="num text-right text-[var(--tinta-3)]"
+                          title="Registros lidos da API, somando as páginas de todas as janelas"
+                        >
+                          {p.registros.toLocaleString("pt-BR")}
+                        </td>
+                        <td className="num text-right font-medium">
+                          {p.linhas.toLocaleString("pt-BR")}
+                        </td>
                       </tr>
                     );
                   })}

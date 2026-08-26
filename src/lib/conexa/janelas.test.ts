@@ -127,3 +127,35 @@ describe("ordem de carga", () => {
     expect(ORDEM_DE_CARGA.at(-1)).toBe("sales");
   });
 });
+
+/**
+ * A janela FUTURA do incremental é a causa do "83/82" que apareceu na tela —
+ * e, embaixo dele, de um selo de completude que podia mentir.
+ *
+ * Entidade mutável ganha uma janela do mês SEGUINTE (um vencimento pode ser
+ * empurrado para frente). Ela fecha como CONCLUIDA, mas NÃO pertence ao
+ * período histórico. Contá-la deixava uma janela histórica pendente ser
+ * compensada pela futura, e a entidade era declarada completa sem estar.
+ */
+describe("janela futura vs. período histórico", () => {
+  const atual = "2026-08";
+
+  it("entidade mutável ganha uma janela além do mês corrente", () => {
+    expect(janelasIncrementais("contracts", atual).at(-1)).toBe("2026-09");
+    expect(janelasIncrementais("charges", atual).at(-1)).toBe("2026-09");
+  });
+
+  it("entidade imutável não ganha janela futura — registro novo nasce na corrente", () => {
+    expect(janelasIncrementais("bookings", atual)).toEqual([atual]);
+    expect(janelasIncrementais("customers", atual)).toEqual([atual]);
+    expect(janelasIncrementais("sales", atual)).toEqual([atual]);
+  });
+
+  it("o período histórico PARA no mês corrente — a futura fica de fora", () => {
+    const periodo = gerarJanelas("2019-01", atual);
+    expect(periodo.at(-1)).toBe(atual);
+    expect(periodo).not.toContain("2026-09");
+    // É esta diferença que produzia concluídas > totais.
+    expect(janelasIncrementais("contracts", atual).some((j) => !periodo.includes(j))).toBe(true);
+  });
+});

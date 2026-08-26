@@ -145,7 +145,24 @@ export async function sincronizarJanela(
   });
 
   let offset = registro.offset;
-  let registros = registro.registros;
+  /**
+   * ⚠ Zera quando a varredura recomeça do início.
+   *
+   * `registros` partia SEMPRE do valor já gravado e somava em cima. Numa janela
+   * já CONCLUIDA o offset é zerado de propósito (para a janela ser
+   * re-verificável), então reprocessá-la varria tudo de novo e **somava o
+   * conteúdo inteiro outra vez**. E quem reprocessa é o incremental, a cada 30
+   * minutos, nas janelas recentes das entidades mutáveis.
+   *
+   * O efeito medido em produção: contratos com 2.931 linhas no espelho
+   * exibindo 3.133 "registros" — e subindo a cada passada do incremental, sem
+   * teto. Um número que cresce sozinho é pior que um número errado: ele parece
+   * progresso.
+   *
+   * Retomada no meio da janela (offset > 0) preserva a contagem parcial, que é
+   * o caso para o qual o campo existe.
+   */
+  let registros = offset === 0 ? 0 : registro.registros;
   let paginas = 0;
 
   try {
@@ -429,6 +446,36 @@ export async function sincronizarIncremental(
 }
 
 /**
+ * As janelas que COMPÕEM o histórico de uma entidade: do fundo até o mês
+ * corrente. `null` enquanto o fundo não foi achado — desconhecido não é lista.
+ *
+ * ⚠ Existe para separar "janela do período" de "janela que existe na tabela".
+ * Elas não são a mesma coisa: para entidade MUTÁVEL, `janelasIncrementais`
+ * cria também a janela do **mês seguinte** (um vencimento pode ser empurrado
+ * para frente). Essa janela fecha como CONCLUIDA e ficava contada.
+ *
+ * Sintoma visível: contratos exibindo **83/82** janelas — mais concluídas do
+ * que existem. O problema de verdade estava embaixo: `estadoDoEspelho` carimba
+ * "completa" com `concluidas >= totais`, então uma janela histórica faltando
+ * podia ser compensada pela janela futura e a entidade seria declarada
+ * completa **sem estar**. Isso fura a garantia central do projeto — o selo de
+ * completude é a coisa que autoriza um número a virar fato.
+ */
+/** Linhas distintas de cada entidade no espelho. */
+const CONTADOR_LINHAS: Record<Entidade, () => Promise<number>> = {
+  customers: () => prisma.customer.count(),
+  contracts: () => prisma.contract.count(),
+  charges: () => prisma.charge.count(),
+  sales: () => prisma.sale.count(),
+  bookings: () => prisma.roomBooking.count(),
+};
+
+export function janelasDoPeriodo(fundo: string | null): Set<string> | null {
+  if (!fundo) return null;
+  return new Set(gerarJanelas(fundo, currentMonthKey()));
+}
+
+/**
  * Sinal de vida da carga.
  *
  * ⚠ Responde "está trabalhando AGORA?", que é diferente de "quando terminou a
@@ -473,20 +520,32 @@ export async function progressoDaCarga(): Promise<
     fundoConhecido: boolean;
     total: number | null;
     concluidas: number;
+    /** Somatório do que foi LIDO da API por janela. */
     registros: number;
+    /** Linhas distintas no espelho. É este que bate com o cartão do topo. */
+    linhas: number;
   }>
 > {
   const saida = [];
   for (const entidade of Object.keys(ENTIDADES) as Entidade[]) {
     const fundo = await prisma.syncState.findUnique({ where: { key: `fundo:${entidade}` } });
     const janelas = await prisma.syncWindow.findMany({ where: { entidade } });
-    const concluidas = janelas.filter((j) => j.status === "CONCLUIDA").length;
+    const doPeriodo = janelasDoPeriodo(fundo?.cursor ?? null);
+    const concluidas = janelas.filter(
+      (j) => j.status === "CONCLUIDA" && (!doPeriodo || doPeriodo.has(j.janela)),
+    ).length;
     saida.push({
       entidade,
       fundoConhecido: Boolean(fundo?.cursor),
-      total: fundo?.cursor ? gerarJanelas(fundo.cursor, currentMonthKey()).length : null,
+      total: doPeriodo ? doPeriodo.size : null,
       concluidas,
       registros: janelas.reduce((a, j) => a + j.registros, 0),
+      // ⚠ Mostrar as duas ao lado é deliberado. "Lidos" é maior que "linhas"
+      // por um motivo REAL e documentado — a paginação do Conexa repete
+      // registro entre páginas (a API não devolve em ordem), e o upsert
+      // colapsa. Sem as duas colunas juntas, a diferença parecia erro; com
+      // elas, é conferível.
+      linhas: await CONTADOR_LINHAS[entidade](),
     });
   }
   return saida;
