@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { usuarioAtual } from "@/lib/auth/session";
-import { progressoDaCarga } from "@/lib/conexa/sync-janelas";
+import { progressoDaCarga, pulsoDaCarga } from "@/lib/conexa/sync-janelas";
 import { dataHoraLocal } from "@/lib/dates";
 import { PainelOperacao } from "./painel";
+import { Pulso } from "./pulso";
 import { Cabecalho, Faixa, Nota, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
 
@@ -14,9 +15,10 @@ export default async function Motor() {
   const usuario = await usuarioAtual();
   const admin = usuario?.role === "ADMIN";
 
-  const [runs, progresso, contagens] = await Promise.all([
+  const [runs, progresso, pulso, contagens] = await Promise.all([
     prisma.syncRun.findMany({ orderBy: { startedAt: "desc" }, take: 15 }),
     progressoDaCarga(),
+    pulsoDaCarga(),
     Promise.all([
       prisma.customer.count(),
       prisma.contract.count(),
@@ -68,6 +70,13 @@ export default async function Motor() {
         <Secao
           titulo="Progresso da carga"
           sub="Por janela mensal, do mês corrente para trás."
+          acao={
+            <Pulso
+              ultimaEscritaISO={pulso.ultimaEscrita?.toISOString() ?? null}
+              janelaEmAndamento={pulso.janelaEmAndamento}
+              pendentes={pulso.pendentes}
+            />
+          }
         >
           <Painel
             rodape={
@@ -149,8 +158,11 @@ export default async function Motor() {
             <Painel
               rodape={
                 <>
-                  <strong>HALTED</strong> não é falha: é o freio de páginas por execução ou um
-                  encerramento pedido. O cursor guarda o ponto e a próxima execução continua dali.
+                  <strong>HALTED</strong> não é falha: é o orçamento de tempo da execução acabando
+                  — o caso normal do agendador, que trabalha 8,5 min a cada 10. O progresso fica
+                  gravado por janela e a próxima execução continua exatamente dali.{" "}
+                  <strong>backfill</strong> é a carga histórica e <strong>incremental</strong> é a
+                  releitura das janelas recentes; as duas rodam sozinhas.
                 </>
               }
             >
@@ -257,6 +269,8 @@ function Estado({ status }: { status: string }) {
         ? "selo-critico"
         : status === "HALTED"
           ? "selo-info"
-          : "";
+          : status === "RUNNING"
+            ? "selo-atencao"
+            : "";
   return <span className={cn("selo", classe)}>{status}</span>;
 }

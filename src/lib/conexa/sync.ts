@@ -1,7 +1,7 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { paginatePages, requisicoesFeitas } from "./client";
+import { abrirRun, fecharRun, iniciarHeartbeat, type SyncMode } from "./run";
 import {
   mapCharge,
   mapCompany,
@@ -38,12 +38,10 @@ import type {
  *    encerramento drenar em vez de ser morto no meio.
  */
 
-/** Identidade deste processo — usada no heartbeat do SyncRun (ADR-0003). */
-export const PROCESS_ID = randomUUID();
-
-const HEARTBEAT_MS = 30_000;
-
-export type SyncMode = "dimensions" | "backfill" | "reconcile" | "intelligence";
+// A contabilidade de execuções vive em `./run`, compartilhada com a carga por
+// janela — que antes não registrava execução nenhuma. Reexportado aqui para não
+// quebrar quem já importava daqui.
+export { PROCESS_ID, enterrarZumbis, type SyncMode } from "./run";
 
 export interface SyncResultado {
   runId: string;
@@ -81,64 +79,6 @@ async function gravarCursor(key: string, offset: number): Promise<void> {
 
 async function limparCursor(key: string): Promise<void> {
   await prisma.syncState.deleteMany({ where: { key } });
-}
-
-// ---------------------------------------------------------------------------
-// Run + heartbeat
-// ---------------------------------------------------------------------------
-
-async function abrirRun(mode: SyncMode, entity?: string): Promise<string> {
-  const run = await prisma.syncRun.create({
-    data: { mode, entity: entity ?? null, ownerId: PROCESS_ID, heartbeatAt: new Date() },
-  });
-  return run.id;
-}
-
-async function fecharRun(
-  runId: string,
-  status: "SUCCESS" | "FAILED" | "HALTED",
-  ctx: Ctx,
-  erro?: string,
-) {
-  await prisma.syncRun.update({
-    where: { id: runId },
-    data: {
-      status,
-      finishedAt: new Date(),
-      recordsRead: ctx.lidos,
-      recordsWrote: ctx.gravados,
-      requestsMade: requisicoesFeitas(),
-      error: erro ?? null,
-    },
-  });
-}
-
-/**
- * Enterra runs zumbis: `RUNNING` cujo heartbeat parou há mais de 3 batidas.
- *
- * ⚠ Por HEARTBEAT, não por "existe um RUNNING". O irmão marca todo RUNNING como
- * falho no boot, o que só está correto sob a premissa "um container só" — com
- * duas réplicas, o boot da segunda mata o backfill vivo da primeira. Ver
- * ADR-0003.
- */
-export async function enterrarZumbis(): Promise<number> {
-  const limite = new Date(Date.now() - HEARTBEAT_MS * 3);
-  const r = await prisma.syncRun.updateMany({
-    where: { status: "RUNNING", OR: [{ heartbeatAt: { lt: limite } }, { heartbeatAt: null }] },
-    data: { status: "FAILED", finishedAt: new Date(), error: "Processo morreu sem encerrar o run (heartbeat vencido)." },
-  });
-  return r.count;
-}
-
-function iniciarHeartbeat(runId: string): NodeJS.Timeout {
-  const t = setInterval(() => {
-    prisma.syncRun
-      .update({ where: { id: runId }, data: { heartbeatAt: new Date() } })
-      .catch(() => {});
-  }, HEARTBEAT_MS);
-  // Não segurar o processo aberto só por causa do heartbeat.
-  t.unref?.();
-  return t;
 }
 
 // ---------------------------------------------------------------------------

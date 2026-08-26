@@ -47,11 +47,13 @@ export function PainelOperacao() {
 
       <div className="px-4 py-4">
         <p className="max-w-3xl text-[13.5px] leading-relaxed text-[var(--tinta-3)]">
-          Na ordem: cadastros primeiro (tudo depende deles), depois a carga, depois a consolidação.
-          A carga é feita <strong className="font-semibold text-[var(--tinta-2)]">por janela
-          mensal</strong>, da mais recente para a mais antiga, com teto por execução — rodar de novo
-          continua de onde parou. O incremental reprocessa só as janelas recentes e é o que um cron
-          deve chamar.
+          <strong className="font-semibold text-[var(--tinta-2)]">
+            As quatro rodam sozinhas pelo agendador embutido.
+          </strong>{" "}
+          Estes botões são para empurrar na frente da fila — não são obrigatórios. A carga é feita{" "}
+          <strong className="font-semibold text-[var(--tinta-2)]">por janela mensal</strong>, da mais
+          recente para a mais antiga, e prioriza o que destrava a fila do Radar (contratos e
+          reservas) antes do resto. Rodar de novo continua de onde parou.
         </p>
 
         <div className="mt-3.5 flex flex-wrap gap-2">

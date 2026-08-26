@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { paginatePages, requisicoesFeitas } from "./client";
+import { abrirRun, fecharRun, iniciarHeartbeat } from "./run";
 import { currentMonthKey } from "@/lib/dates";
 import {
   ENTIDADES,
@@ -241,77 +242,101 @@ export async function cargaHistorica(
   let registros = 0;
   let interrompida = false;
 
-  for (const entidade of alvos) {
-    const feitas = await prisma.syncWindow.findMany({
-      where: { entidade },
-      select: { janela: true, status: true, registros: true },
-    });
-    const porJanela = new Map(feitas.map((f) => [f.janela, f]));
+  // ⚠ Registrar a execução não é telemetria opcional. Sem isto, a carga que o
+  // agendador roda o dia inteiro NÃO aparecia em "Execuções recentes" nem movia
+  // o selo de frescura da barra superior: a tela ficava idêntica por horas, e
+  // "trabalhando" virava indistinguível de "morto" — exatamente o modo de falha
+  // silencioso que o resto do projeto se esforça para tornar impossível.
+  const runId = await abrirRun("backfill", alvos.join(","));
+  const hb = iniciarHeartbeat(runId);
 
-    // Já sabemos onde é o fundo? Então não precisa procurar de novo.
-    const fundo = await prisma.syncState.findUnique({
-      where: { key: `fundo:${entidade}` },
-    });
+  try {
+    for (const entidade of alvos) {
+      const feitas = await prisma.syncWindow.findMany({
+        where: { entidade },
+        select: { janela: true, status: true, registros: true },
+      });
+      const porJanela = new Map(feitas.map((f) => [f.janela, f]));
 
-    let vaziasSeguidas = 0;
-    for (const janela of janelasParaTras(MAX_JANELAS_HISTORICO)) {
-      if (fundo?.cursor && janela < fundo.cursor) break; // além do fundo conhecido
+      // Já sabemos onde é o fundo? Então não precisa procurar de novo.
+      const fundo = await prisma.syncState.findUnique({
+        where: { key: `fundo:${entidade}` },
+      });
 
-      const ja = porJanela.get(janela);
-      if (ja?.status === "CONCLUIDA") {
-        // Conta o vazio mesmo em janela já feita: é assim que o fundo é
-        // reconhecido numa segunda execução.
-        vaziasSeguidas = ja.registros === 0 ? vaziasSeguidas + 1 : 0;
+      let vaziasSeguidas = 0;
+      for (const janela of janelasParaTras(MAX_JANELAS_HISTORICO)) {
+        if (fundo?.cursor && janela < fundo.cursor) break; // além do fundo conhecido
+
+        const ja = porJanela.get(janela);
+        if (ja?.status === "CONCLUIDA") {
+          // Conta o vazio mesmo em janela já feita: é assim que o fundo é
+          // reconhecido numa segunda execução.
+          vaziasSeguidas = ja.registros === 0 ? vaziasSeguidas + 1 : 0;
+          if (vaziasSeguidas >= JANELAS_VAZIAS_PARA_PARAR) {
+            await marcarFundo(entidade, janela);
+            break;
+          }
+          continue;
+        }
+
+        if (detalhe.length >= teto || prazo.signal?.aborted) {
+          interrompida = true;
+          break;
+        }
+
+        const r = await sincronizarJanela(entidade, janela, {
+          maxPaginas: opts.maxPaginasPorJanela,
+          // Prazo, não o sinal cru: assim a interrupção também corta a paginação
+          // no MEIO de uma janela grande. Sem isso, uma janela de 5 páginas
+          // estouraria o orçamento em até 5 requisições.
+          signal: prazo.signal,
+        });
+        detalhe.push(r);
+        registros += r.registros;
+        if (r.status === "FALHOU") break;
+
+        vaziasSeguidas = r.status === "CONCLUIDA" && r.registros === 0 ? vaziasSeguidas + 1 : 0;
         if (vaziasSeguidas >= JANELAS_VAZIAS_PARA_PARAR) {
           await marcarFundo(entidade, janela);
           break;
         }
-        continue;
       }
-
-      if (detalhe.length >= teto || prazo.signal?.aborted) {
-        interrompida = true;
-        break;
-      }
-
-      const r = await sincronizarJanela(entidade, janela, {
-        maxPaginas: opts.maxPaginasPorJanela,
-        // Prazo, não o sinal cru: assim a interrupção também corta a paginação
-        // no MEIO de uma janela grande. Sem isso, uma janela de 5 páginas
-        // estouraria o orçamento em até 5 requisições.
-        signal: prazo.signal,
-      });
-      detalhe.push(r);
-      registros += r.registros;
-      if (r.status === "FALHOU") break;
-
-      vaziasSeguidas = r.status === "CONCLUIDA" && r.registros === 0 ? vaziasSeguidas + 1 : 0;
-      if (vaziasSeguidas >= JANELAS_VAZIAS_PARA_PARAR) {
-        await marcarFundo(entidade, janela);
-        break;
-      }
+      if (interrompida) break;
     }
-    if (interrompida) break;
+
+    prazo.limpar();
+
+    const [concluidas, pendentes] = await Promise.all([
+      prisma.syncWindow.count({ where: { status: "CONCLUIDA" } }),
+      prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
+    ]);
+
+    // HALTED quando o prazo cortou — é o freio funcionando, não falha. A tela
+    // já explica que HALTED significa "continua de onde parou".
+    await fecharRun(runId, interrompida ? "HALTED" : "SUCCESS", {
+      lidos: registros,
+      gravados: registros,
+    });
+
+    return {
+      janelasConcluidas: concluidas,
+      janelasPendentes: pendentes,
+      registros,
+      requisicoes: requisicoesFeitas(),
+      // Com orçamento de tempo, `interrompida: true` passa a ser o caso NORMAL,
+      // e não sinal de erro: o progresso fica gravado por janela e a próxima
+      // execução continua exatamente de onde parou.
+      interrompida,
+      detalhe,
+    };
+  } catch (err) {
+    prazo.limpar();
+    const msg = err instanceof Error ? err.message : String(err);
+    await fecharRun(runId, "FAILED", { lidos: registros, gravados: registros }, msg);
+    throw err;
+  } finally {
+    clearInterval(hb);
   }
-
-  prazo.limpar();
-
-  const [concluidas, pendentes] = await Promise.all([
-    prisma.syncWindow.count({ where: { status: "CONCLUIDA" } }),
-    prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
-  ]);
-
-  return {
-    janelasConcluidas: concluidas,
-    janelasPendentes: pendentes,
-    registros,
-    requisicoes: requisicoesFeitas(),
-    // Com orçamento de tempo, `interrompida: true` passa a ser o caso NORMAL, e
-    // não sinal de erro: o progresso fica gravado por janela e a próxima
-    // execução continua exatamente de onde parou.
-    interrompida,
-    detalhe,
-  };
 }
 
 /**
@@ -361,27 +386,78 @@ export async function sincronizarIncremental(
   const detalhe: ResultadoJanela[] = [];
   let registros = 0;
 
-  for (const entidade of alvos) {
-    for (const janela of janelasIncrementais(entidade, atual, opts.mesesParaTras ?? 3)) {
-      if (opts.signal?.aborted) break;
-      const r = await sincronizarJanela(entidade, janela, { signal: opts.signal });
-      detalhe.push(r);
-      registros += r.registros;
-    }
-  }
+  // Também registra execução: é o que mantém o selo de frescura respondendo
+  // "os dados são de agora?" em regime, quando a carga histórica já terminou e
+  // só o incremental segue rodando.
+  const runId = await abrirRun("incremental", alvos.join(","));
+  const hb = iniciarHeartbeat(runId);
 
-  const [concluidas, pendentes] = await Promise.all([
-    prisma.syncWindow.count({ where: { status: "CONCLUIDA" } }),
+  try {
+    for (const entidade of alvos) {
+      for (const janela of janelasIncrementais(entidade, atual, opts.mesesParaTras ?? 3)) {
+        if (opts.signal?.aborted) break;
+        const r = await sincronizarJanela(entidade, janela, { signal: opts.signal });
+        detalhe.push(r);
+        registros += r.registros;
+      }
+    }
+
+    const [concluidas, pendentes] = await Promise.all([
+      prisma.syncWindow.count({ where: { status: "CONCLUIDA" } }),
+      prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
+    ]);
+
+    await fecharRun(runId, "SUCCESS", { lidos: registros, gravados: registros });
+
+    return {
+      janelasConcluidas: concluidas,
+      janelasPendentes: pendentes,
+      registros,
+      requisicoes: requisicoesFeitas(),
+      interrompida: false,
+      detalhe,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await fecharRun(runId, "FAILED", { lidos: registros, gravados: registros }, msg);
+    throw err;
+  } finally {
+    // ⚠ Sem isto o heartbeat continuaria batendo por um run morto, e
+    // `enterrarZumbis` — que decide por batida vencida — nunca o enterraria.
+    clearInterval(hb);
+  }
+}
+
+/**
+ * Sinal de vida da carga.
+ *
+ * ⚠ Responde "está trabalhando AGORA?", que é diferente de "quando terminou a
+ * última execução?". `SyncWindow.atualizadaEm` é `@updatedAt`, então cada
+ * página gravada o move — é o pulso mais fino que existe, muito antes de uma
+ * janela fechar ou de um run encerrar.
+ *
+ * Sem isto a tela Motor era estática: números idênticos por minutos, e nenhuma
+ * forma de distinguir "carregando uma janela grande" de "agendador morto".
+ */
+export async function pulsoDaCarga(): Promise<{
+  ultimaEscrita: Date | null;
+  janelaEmAndamento: { entidade: string; janela: string } | null;
+  pendentes: number;
+}> {
+  const [agg, emAndamento, pendentes] = await Promise.all([
+    prisma.syncWindow.aggregate({ _max: { atualizadaEm: true } }),
+    prisma.syncWindow.findFirst({
+      where: { status: "EM_ANDAMENTO" },
+      orderBy: { atualizadaEm: "desc" },
+      select: { entidade: true, janela: true },
+    }),
     prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
   ]);
 
   return {
-    janelasConcluidas: concluidas,
-    janelasPendentes: pendentes,
-    registros,
-    requisicoes: requisicoesFeitas(),
-    interrompida: false,
-    detalhe,
+    ultimaEscrita: agg._max.atualizadaEm ?? null,
+    janelaEmAndamento: emAndamento,
+    pendentes,
   };
 }
 
