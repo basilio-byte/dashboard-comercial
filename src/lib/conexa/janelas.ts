@@ -59,6 +59,35 @@ export const ENTIDADES: Record<Entidade, DefinicaoEntidade> = {
   contracts: { recurso: "contracts", filtro: "startDate", formato: "data", imutavel: false },
 };
 
+/**
+ * ORDEM DE CARGA — por PORTÃO DE CONFIANÇA, não pela ordem em que as entidades
+ * foram escritas no arquivo.
+ *
+ * ⚠ O teto de janelas por execução é GLOBAL, não por entidade: quem vem
+ * primeiro come o orçamento inteiro. Na ordem anterior (a de declaração do
+ * objeto) `sales` era a segunda — a maior entidade do espelho, ~68.500
+ * registros — e `contracts` era a última. Resultado observado na primeira carga
+ * real: depois de horas, `sales` em 10 janelas e `contracts` em 5, com a fila
+ * do Radar parada esperando justamente `contracts`.
+ *
+ * O critério certo é *o que cada entidade destrava* (ver `completude.ts`):
+ *
+ * | Portão            | Exige                  | Destrava            |
+ * |-------------------|------------------------|---------------------|
+ * | `horasConfiavel`  | contracts + bookings   | a fila do Radar     |
+ * | `receitaConfiavel`| customers + charges    | receita e Top 5     |
+ *
+ * `sales` não participa de nenhum portão — só do selo de completude. Por isso
+ * vai por último: é a maior e a que menos destrava.
+ */
+export const ORDEM_DE_CARGA: Entidade[] = [
+  "contracts",
+  "bookings",
+  "customers",
+  "charges",
+  "sales",
+];
+
 /** Fuso da empresa, fixo no formato que a API exige. */
 const OFFSET = "-03:00";
 

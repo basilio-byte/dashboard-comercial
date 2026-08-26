@@ -4,6 +4,7 @@ import { paginatePages, requisicoesFeitas } from "./client";
 import { currentMonthKey } from "@/lib/dates";
 import {
   ENTIDADES,
+  ORDEM_DE_CARGA,
   gerarJanelas,
   janelasIncrementais,
   limitesDaJanela,
@@ -216,11 +217,26 @@ export async function cargaHistorica(
     entidades?: Entidade[];
     maxJanelas?: number;
     maxPaginasPorJanela?: number;
+    /**
+     * Orçamento de TEMPO. Substitui o teto de janelas como freio principal.
+     *
+     * ⚠ Contar janelas era medir a coisa errada. Uma janela custa de 1 a 5
+     * requisições dependendo do volume do mês, então "20 janelas" tanto podia
+     * gastar 20 requisições quanto 100 — e o teto foi calibrado pelo pior caso.
+     * Medido em produção: o agendador usava 6–18% do orçamento de requisições
+     * disponível entre um ciclo e o outro, e a carga que caberia em ~40min
+     * levava horas. Com prazo, a execução usa o que tem e o limitador de taxa
+     * continua sendo quem protege a API.
+     */
+    orcamentoMs?: number;
     signal?: AbortSignal;
   } = {},
 ): Promise<ResultadoCarga> {
-  const alvos = opts.entidades ?? (Object.keys(ENTIDADES) as Entidade[]);
-  const teto = opts.maxJanelas ?? 12;
+  const alvos = opts.entidades ?? ORDEM_DE_CARGA;
+  // Sem prazo, mantém o teto de janelas — é o modo do clique manual, que precisa
+  // caber na duração de um request.
+  const teto = opts.maxJanelas ?? (opts.orcamentoMs ? Number.POSITIVE_INFINITY : 12);
+  const prazo = comPrazo(opts.signal, opts.orcamentoMs);
   const detalhe: ResultadoJanela[] = [];
   let registros = 0;
   let interrompida = false;
@@ -253,14 +269,17 @@ export async function cargaHistorica(
         continue;
       }
 
-      if (detalhe.length >= teto || opts.signal?.aborted) {
+      if (detalhe.length >= teto || prazo.signal?.aborted) {
         interrompida = true;
         break;
       }
 
       const r = await sincronizarJanela(entidade, janela, {
         maxPaginas: opts.maxPaginasPorJanela,
-        signal: opts.signal,
+        // Prazo, não o sinal cru: assim a interrupção também corta a paginação
+        // no MEIO de uma janela grande. Sem isso, uma janela de 5 páginas
+        // estouraria o orçamento em até 5 requisições.
+        signal: prazo.signal,
       });
       detalhe.push(r);
       registros += r.registros;
@@ -275,6 +294,8 @@ export async function cargaHistorica(
     if (interrompida) break;
   }
 
+  prazo.limpar();
+
   const [concluidas, pendentes] = await Promise.all([
     prisma.syncWindow.count({ where: { status: "CONCLUIDA" } }),
     prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
@@ -285,9 +306,32 @@ export async function cargaHistorica(
     janelasPendentes: pendentes,
     registros,
     requisicoes: requisicoesFeitas(),
+    // Com orçamento de tempo, `interrompida: true` passa a ser o caso NORMAL, e
+    // não sinal de erro: o progresso fica gravado por janela e a próxima
+    // execução continua exatamente de onde parou.
     interrompida,
     detalhe,
   };
+}
+
+/**
+ * Combina o sinal do chamador com um prazo.
+ *
+ * Escrito à mão em vez de `AbortSignal.any` + `AbortSignal.timeout` para não
+ * depender da versão do runtime — e porque o `clearTimeout` importa: um
+ * temporizador pendurado segura o processo vivo entre as execuções do
+ * agendador.
+ */
+function comPrazo(
+  signal: AbortSignal | undefined,
+  orcamentoMs: number | undefined,
+): { signal: AbortSignal | undefined; limpar: () => void } {
+  if (!orcamentoMs) return { signal, limpar: () => {} };
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), orcamentoMs);
+  signal?.addEventListener("abort", () => ctrl.abort(), { once: true });
+  return { signal: ctrl.signal, limpar: () => clearTimeout(t) };
 }
 
 async function marcarFundo(entidade: Entidade, janela: string): Promise<void> {

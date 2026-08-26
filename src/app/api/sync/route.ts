@@ -43,15 +43,25 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           await sincronizarIncremental({ entidades: entidades as Entidade[] | undefined }),
         );
-      case "backfill":
-        // Teto de janelas por chamada: cabe folgado em `maxDuration` e o
-        // progresso fica gravado, então chamar de novo continua de onde parou.
+      case "backfill": {
+        // `minutes` é o freio preferido: gasta o orçamento de requisições em vez
+        // de contar janelas, que custam de 1 a 5 requisições cada. Teto de 4,5
+        // min para caber em `maxDuration` (5 min) com margem para a resposta.
+        // `windows` segue aceito para chamada pontual.
+        const minutos = params.get("minutes");
+        const janelas = params.get("windows");
         return NextResponse.json(
           await cargaHistorica({
             entidades: entidades as Entidade[] | undefined,
-            maxJanelas: Number(params.get("windows") ?? 12),
+            orcamentoMs: minutos
+              ? Math.min(Number(minutos), 4.5) * 60_000
+              : janelas
+                ? undefined
+                : 4.5 * 60_000,
+            maxJanelas: janelas ? Number(janelas) : undefined,
           }),
         );
+      }
       case "intelligence":
         return NextResponse.json(await consolidarTudo());
       default:

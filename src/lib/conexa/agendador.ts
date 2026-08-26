@@ -1,6 +1,7 @@
 import "server-only";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { cargaHistorica, sincronizarIncremental } from "./sync-janelas";
+import { syncDimensoes } from "./sync";
 import { consolidarTudo } from "@/lib/intel/consolidar";
 import { prisma } from "@/lib/db";
 
@@ -27,12 +28,22 @@ import { prisma } from "@/lib/db";
  */
 
 const MINUTO = 60_000;
+const HORA = 60 * MINUTO;
 
 interface Tarefa {
   nome: string;
   intervaloMs: number;
   ligada: () => boolean;
   executar: () => Promise<unknown>;
+  /**
+   * Roda uma vez logo após o boot, além do horário de parede.
+   *
+   * ⚠ Não contradiz a âncora de relógio acima: a fase RECORRENTE continua em
+   * múltiplos exatos do intervalo. Isto é um disparo extra, para tarefa cuja
+   * ausência é um bloqueio — esperar até 6h pelo primeiro ciclo seria o mesmo
+   * que não ter.
+   */
+  aoLigar?: boolean;
 }
 
 /** Evita sobreposição: se a anterior não terminou, a vez é pulada e registrada. */
@@ -41,6 +52,24 @@ const emExecucao = new Set<string>();
 function tarefas(): Tarefa[] {
   const env = getEnv();
   return [
+    {
+      /**
+       * Cadastros: empresas, categorias, PLANOS e produtos.
+       *
+       * ⚠ Estava fora do agendador, e o buraco apareceu em produção: com o
+       * banco carregado por dias, `Planos` seguia em **0** porque só o clique
+       * manual em "Sincronizar cadastros" carregava a tabela. Sem plano não há
+       * `plan.hourQuotas`, sem cota todo contrato vira "sem cota", e o gatilho
+       * de excedente — o ÚNICO que roda hoje — não pode disparar nunca.
+       *
+       * São ~7 requisições. Não havia motivo para depender de alguém lembrar.
+       */
+      nome: "cadastros",
+      intervaloMs: 6 * HORA,
+      aoLigar: true,
+      ligada: () => env.SYNC_SCHEDULER === "on" && conexaConfigurado(),
+      executar: () => syncDimensoes(),
+    },
     {
       // Continua a carga histórica enquanto houver janela pendente. É o que faz
       // a primeira carga acontecer sozinha, em vez de exigir dezenas de cliques.
@@ -54,7 +83,21 @@ function tarefas(): Tarefa[] {
         const fundos = await prisma.syncState.count({ where: { key: { startsWith: "fundo:" } } });
         // Nada pendente E todos os fundos encontrados: a carga terminou.
         if (pendentes === 0 && fundos >= 5) return { pulado: "carga completa" };
-        return cargaHistorica({ maxJanelas: 20 });
+        /**
+         * ⚠ Orçamento de TEMPO, não teto de janelas.
+         *
+         * `maxJanelas: 20` media a coisa errada: uma janela custa de 1 a 5
+         * requisições conforme o volume do mês, e o teto foi calibrado pelo
+         * pior caso. Medido em produção — 20 janelas gastavam ~20 a 60
+         * requisições num ciclo onde cabiam ~330 (35 req/min × 10 min). O
+         * agendador usava 6–18% do que tinha, e a carga que caberia em ~40
+         * minutos levava horas.
+         *
+         * Com prazo, quem protege a API é o limitador de taxa — que é o papel
+         * dele — e a janela ociosa some. 8,5 min deixa margem para a execução
+         * fechar antes do próximo ciclo.
+         */
+        return cargaHistorica({ orcamentoMs: 8.5 * MINUTO });
       },
     },
     {
@@ -115,6 +158,10 @@ export function ligarAgendador(): void {
         emExecucao.delete(t.nome);
       }
     };
+
+    // Disparo extra logo depois do boot, para tarefa cuja ausência bloqueia.
+    // 20s de folga para não competir com a subida do servidor.
+    if (t.aoLigar) setTimeout(() => void disparar(), 20_000).unref?.();
 
     setTimeout(() => {
       void disparar();

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ENTIDADES, gerarJanelas, janelasIncrementais, limitesDaJanela } from "./janelas";
+import {
+  ENTIDADES,
+  ORDEM_DE_CARGA,
+  gerarJanelas,
+  janelasIncrementais,
+  limitesDaJanela,
+} from "./janelas";
 
 describe("limites da janela", () => {
   it("filtro de DATA aceita data pura", () => {
@@ -90,5 +96,34 @@ describe("definições das entidades", () => {
         expect(def.formato, `${nome} usa datetime`).toBe("datetime");
       }
     }
+  });
+});
+
+/**
+ * A ordem de carga é uma DECISÃO DE PRODUTO, não estilo.
+ *
+ * O teto de janelas por execução é global: quem vem primeiro come o orçamento
+ * inteiro. Com `sales` na frente — a maior entidade, e a única que não
+ * participa de nenhum portão de confiança — a fila do Radar ficava por último.
+ * Aconteceu na primeira carga real. Estes testes fazem uma reordenação
+ * descuidada falhar em vez de custar horas de carga.
+ */
+describe("ordem de carga", () => {
+  it("cobre todas as entidades, sem repetir nem faltar", () => {
+    expect([...ORDEM_DE_CARGA].sort()).toEqual(Object.keys(ENTIDADES).sort());
+  });
+
+  it("carrega antes o que destrava a fila do Radar", () => {
+    // horasConfiavel = contracts + bookings. É o produto da tela.
+    const ultimoDoPortao = Math.max(
+      ORDEM_DE_CARGA.indexOf("contracts"),
+      ORDEM_DE_CARGA.indexOf("bookings"),
+    );
+    const outras = ORDEM_DE_CARGA.filter((e) => e !== "contracts" && e !== "bookings");
+    expect(ultimoDoPortao).toBeLessThan(Math.min(...outras.map((e) => ORDEM_DE_CARGA.indexOf(e))));
+  });
+
+  it("deixa `sales` por último — não participa de portão nenhum", () => {
+    expect(ORDEM_DE_CARGA.at(-1)).toBe("sales");
   });
 });
