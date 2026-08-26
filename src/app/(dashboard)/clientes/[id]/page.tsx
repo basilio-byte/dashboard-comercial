@@ -5,6 +5,9 @@ import { formatBRL } from "@/lib/money";
 import { currentMonthKey, rotuloMes, ultimosMesesFechados } from "@/lib/dates";
 import { Lacuna, Procedencia } from "@/components/Procedencia";
 import { corVariacao, pct } from "@/lib/ui";
+import { estadoDoEspelho } from "@/lib/intel/completude";
+import { horasDoCliente } from "@/lib/intel/horas";
+import { BlocoHoras } from "@/components/Horas";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +16,7 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
   const conexaId = Number(id);
   if (!Number.isInteger(conexaId)) notFound();
 
-  const [cliente, perfil, mensais, contratos] = await Promise.all([
+  const [cliente, perfil, mensais, contratos, horas, espelho] = await Promise.all([
     prisma.customer.findUnique({ where: { conexaId } }),
     prisma.customerProfile.findUnique({ where: { customerConexaId: conexaId } }),
     prisma.customerMonthlyRevenue.findMany({
@@ -24,6 +27,8 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
       where: { customerConexaId: conexaId },
       orderBy: [{ isActive: "desc" }, { startDate: "desc" }],
     }),
+    horasDoCliente(conexaId),
+    estadoDoEspelho(),
   ]);
 
   if (!cliente) notFound();
@@ -126,6 +131,15 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
           O traço na variação significa <strong>mês anterior sem receita</strong> — não é queda de 100%.
           O mês em curso aparece para consulta e <strong>nunca</strong> alimenta alerta de tendência.
         </p>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Horas de sala por ciclo
+        </h2>
+        <div className="mt-3">
+          <BlocoHoras dados={horas} confiavel={espelho.horasConfiavel} />
+        </div>
       </section>
 
       <section>

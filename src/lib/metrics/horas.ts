@@ -139,11 +139,30 @@ export function abatidaDaCota(r: ReservaParaConsumo): boolean {
  * É o rastro do excedente: quando o cliente estoura a cota, a parte que passou
  * vira cobrança. Também é o consumo inteiro de quem não tem cota nenhuma — o
  * caso do Endereço Fiscal Litoral.
+ *
+ * ⚠ Status medidos em produção numa amostra de 100 reservas:
+ * `deductedFromQuota` (37), **`paid` (48)**, `cancelled` (14), `notBilled` (1).
+ * O status de faturada é `paid` — `billed` fica aceito por segurança, mas quem
+ * aparece no dado real é `paid`.
  */
 export function faturada(r: ReservaParaConsumo): boolean {
   if (r.isActive === false) return false;
   if (r.cancellationReason) return false;
   return r.status === "billed" || r.status === "paid";
+}
+
+/**
+ * Reserva que aconteceu mas **não foi faturada nem abatida** (`notBilled`).
+ *
+ * Existe no dado real e é ambígua: pode ser cobrança ainda não gerada, ou
+ * cortesia. Somá-la ao consumo inflaria o uso; descartá-la em silêncio o
+ * subestimaria. Então ela vira um balde PRÓPRIO, exibido à parte — a lacuna
+ * fica visível em vez de virar um número com cara de fato.
+ */
+export function naoFaturada(r: ReservaParaConsumo): boolean {
+  if (r.isActive === false) return false;
+  if (r.cancellationReason) return false;
+  return r.status === "notBilled";
 }
 
 export interface ConsumoDoCiclo {
@@ -154,7 +173,13 @@ export interface ConsumoDoCiclo {
   abatido: Money;
   /** Horas faturadas à parte — o excedente, quando há cota. */
   faturado: Money;
-  /** Total consumido no ciclo. */
+  /**
+   * Horas de reservas `notBilled` — nem abatidas, nem faturadas. Ambíguas
+   * (cobrança pendente ou cortesia), então ficam FORA de `consumido` e são
+   * exibidas à parte.
+   */
+  naoFaturado: Money;
+  /** Total consumido no ciclo (abatido + faturado). Não inclui o ambíguo. */
   consumido: Money;
   /**
    * Saldo restante. `null` quando não há cota — sem cota não existe saldo, e
@@ -185,10 +210,12 @@ export function consolidarCiclo(
 
   let abatido = money(0);
   let faturado = money(0);
+  let naoFaturado = money(0);
   for (const r of doCiclo) {
     const h = money(r.horas ?? 0);
     if (abatidaDaCota(r)) abatido = abatido.plus(h);
     else if (faturada(r)) faturado = faturado.plus(h);
+    else if (naoFaturada(r)) naoFaturado = naoFaturado.plus(h);
   }
 
   const consumido = abatido.plus(faturado);
@@ -199,6 +226,7 @@ export function consolidarCiclo(
     concedido,
     abatido,
     faturado,
+    naoFaturado,
     consumido,
     saldo,
     // Estourar exige ter cota E ter horas faturadas por cima dela. Sem cota,

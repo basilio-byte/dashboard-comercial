@@ -93,6 +93,21 @@ describe("classificação da reserva", () => {
     expect(abatidaDaCota(r({ status: "billed" }))).toBe(false);
   });
 
+  it("notBilled é balde próprio — nem abatido, nem faturado", () => {
+    // Status real, medido em produção. Ambíguo entre cortesia e cobrança
+    // pendente, então não entra no consumo.
+    const c = consolidarCiclo(
+      { inicio: d("2026-08-26"), fimExclusivo: d("2026-09-26"), rotulo: "x" },
+      [{ status: "notBilled", isActive: true, horas: 3, dataLocal: d("2026-09-01") }],
+      money(5),
+    );
+    expect(c.abatido.toFixed(2)).toBe("0.00");
+    expect(c.faturado.toFixed(2)).toBe("0.00");
+    expect(c.naoFaturado.toFixed(2)).toBe("3.00");
+    expect(c.consumido.toFixed(2)).toBe("0.00");
+    expect(c.estourou).toBe(false);
+  });
+
   it("cancelada não conta, mesmo marcada como abatida", () => {
     expect(abatidaDaCota(r({ cancellationReason: "cliente desistiu" }))).toBe(false);
     expect(abatidaDaCota(r({ isActive: false }))).toBe(false);
@@ -168,6 +183,7 @@ describe("sinal de excedente recorrente", () => {
     concedido: concedido === null ? null : money(concedido),
     abatido: money(abatido),
     faturado: money(faturado),
+    naoFaturado: money(0),
     consumido: money(abatido + faturado),
     saldo: concedido === null ? null : money(concedido - abatido),
     estourou: concedido !== null && faturado > 0,

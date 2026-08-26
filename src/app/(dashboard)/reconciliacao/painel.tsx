@@ -54,12 +54,21 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
       {r ? (
         <div
           className={`rounded border px-4 py-3 ${
-            r.bate ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+            r.veredicto === "BATE"
+              ? "border-emerald-200 bg-emerald-50"
+              : r.veredicto === "DIVERGE"
+                ? "border-red-200 bg-red-50"
+                : "border-amber-300 bg-amber-50"
           }`}
         >
           <p className="font-medium">
-            {r.bate ? `✓ ${rotuloMes(r.mesKey)} bate` : `✗ ${rotuloMes(r.mesKey)} DIVERGE`}
+            {r.veredicto === "BATE"
+              ? `✓ ${rotuloMes(r.mesKey)} bate`
+              : r.veredicto === "DIVERGE"
+                ? `✗ ${rotuloMes(r.mesKey)} DIVERGE`
+                : `⚠ ${rotuloMes(r.mesKey)} — nada conferido`}
           </p>
+          {r.observacao ? <p className="mt-1 text-sm">{r.observacao}</p> : null}
           <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
             <Par t="Local" v={`R$ ${r.localTotal}`} sub={`${r.localContagem} cobranças`} />
             <Par t="Conexa" v={`R$ ${r.remotoTotal}`} sub={`${r.remotoContagem} cobranças`} />

@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { paginatePages } from "@/lib/conexa/client";
 import { monthBounds } from "@/lib/dates";
-import { money, roundMoney, sum, type Money } from "@/lib/money";
+import { roundMoney, sum, type Money } from "@/lib/money";
 import { contaComoReceita, valorFaturado } from "@/lib/metrics/receita";
 import { mapCharge } from "@/lib/conexa/mappers";
 import type { ConexaCharge } from "@/lib/conexa/types";
@@ -10,76 +10,86 @@ import type { ConexaCharge } from "@/lib/conexa/types";
 /**
  * Reconciliação: o espelho local bate com o Conexa?
  *
- * O critério de aceite da Fase 1 é diferença de **R$ 0,00** e contagem 1:1 num
- * mês fechado. Um dashboard comercial que contradiz o financeiro em receita não
- * é "outro recorte" — é um dos dois errado, e ninguém sabe qual.
+ * ⚠ **A janela é por VENCIMENTO, não por emissão.** Medido contra a API: os
+ * únicos filtros de data que `/charges` aceita são `dueDateFrom/To`,
+ * `competenceDateFrom/To` e `paymentDateFrom/To`. **Não existe filtro por
+ * `createdAt`** — e a API não ignora o parâmetro desconhecido: ela devolve
+ * **zero registros**.
  *
- * ⚠ Custa requisições: varre o mês inteiro na API. Roda sob demanda, não em
- * laço automático, por causa do teto compartilhado (ADR-0002).
+ * Isso derrubou a primeira versão desta função, que filtrava por
+ * `createdAtFrom/To`. O remoto vinha sempre vazio e, com o espelho também
+ * vazio, a reconciliação anunciava **"✓ bate"** — um falso verde, que num
+ * verificador é pior que não ter verificador nenhum.
+ *
+ * Como a receita é apurada por EMISSÃO e a emissão não é filtrável, esta função
+ * não prova o total de um mês de emissão. O que ela prova — e é o que importa —
+ * é que **o espelho contém os mesmos registros, com os mesmos valores**, num
+ * conjunto que os dois lados sabem selecionar. Espelho correto ⇒ receita
+ * correta, e a receita é conferida contra a tela do Conexa separadamente.
+ *
+ * (Emissão e vencimento podem estar a meses de distância: medido em produção,
+ * uma cobrança com vencimento em 26/01/2026 foi criada em 24/03/2025.)
  */
 
 export interface Divergencia {
   chargeId: number;
-  motivo: "faltando no espelho" | "sobrando no espelho" | "valor diferente" | "mês diferente";
+  motivo: "faltando no espelho" | "sobrando no espelho" | "valor diferente";
   local?: string;
   remoto?: string;
 }
 
+export type VeredictoReconciliacao = "BATE" | "DIVERGE" | "NADA_A_CONFERIR";
+
 export interface ResultadoReconciliacao {
   mesKey: string;
+  janela: "vencimento";
   localTotal: string;
   localContagem: number;
   remotoTotal: string;
   remotoContagem: number;
   diferenca: string;
-  bate: boolean;
+  veredicto: VeredictoReconciliacao;
   divergencias: Divergencia[];
   requisicoes: number;
+  observacao?: string;
 }
 
 /**
- * Compara um mês fechado. Usa a MESMA régua dos dois lados — se o predicado de
- * exclusão divergisse entre o espelho e a conferência, a reconciliação daria
- * "bate" com os dois lados errados do mesmo jeito.
+ * Compara a janela de VENCIMENTO de um mês. Mesma régua dos dois lados: se o
+ * predicado de exclusão divergisse entre o espelho e a conferência, o resultado
+ * diria "bate" com os dois lados errados do mesmo jeito.
  */
-export async function reconciliarMes(mesKey: string, signal?: AbortSignal): Promise<ResultadoReconciliacao> {
+export async function reconciliarMes(
+  mesKey: string,
+  signal?: AbortSignal,
+): Promise<ResultadoReconciliacao> {
   const { fromDate, toDateExclusive } = monthBounds(mesKey);
+  const ultimoDia = new Date(toDateExclusive.getTime() - 86_400_000);
 
   const locais = await prisma.charge.findMany({
-    where: { emissionDate: { gte: fromDate, lt: toDateExclusive } },
-    select: {
-      conexaId: true,
-      amount: true,
-      currentAmount: true,
-      status: true,
-      cancelDate: true,
-    },
+    where: { dueDate: { gte: fromDate, lt: toDateExclusive } },
+    select: { conexaId: true, amount: true, currentAmount: true, status: true, cancelDate: true },
   });
   const localPorId = new Map(locais.map((c) => [c.conexaId, c]));
   const localReconhecidas = locais.filter((c) => contaComoReceita(c as never));
   const localTotal = roundMoney(sum(localReconhecidas.map((c) => valorFaturado(c as never).toString())));
 
-  // Do lado do Conexa: varre o mês inteiro. A API não filtra por data de
-  // emissão, então filtramos pela emissão derivada de `createdAt`, exatamente
-  // como o espelho faz — senão a comparação seria entre réguas diferentes.
   const remotos = new Map<number, { valor: Money; conta: boolean }>();
   let requisicoes = 0;
 
   for await (const { itens } of paginatePages<ConexaCharge>(
     "charges",
-    { createdAtFrom: isoDe(fromDate), createdAtTo: isoDe(toDateExclusive) },
+    // Filtros REAIS da API. Inclusivos nas duas pontas.
+    { dueDateFrom: iso(fromDate), dueDateTo: iso(ultimoDia) },
     { signal },
   )) {
     requisicoes++;
     for (const bruto of itens) {
-      const mapeado = mapCharge(bruto);
-      if (!mapeado?.emissionDate) continue;
-      // Só conta se a EMISSÃO cair no mês — a janela da API é por createdAt em
-      // UTC, e a emissão é no relógio de parede: as bordas não coincidem.
-      if (mapeado.emissionDate < fromDate || mapeado.emissionDate >= toDateExclusive) continue;
-      remotos.set(mapeado.conexaId, {
-        valor: valorFaturado(mapeado as never),
-        conta: contaComoReceita(mapeado as never),
+      const m = mapCharge(bruto);
+      if (!m) continue;
+      remotos.set(m.conexaId, {
+        valor: valorFaturado(m as never),
+        conta: contaComoReceita(m as never),
       });
     }
   }
@@ -96,43 +106,53 @@ export async function reconciliarMes(mesKey: string, signal?: AbortSignal): Prom
     }
     const vl = valorFaturado(l as never);
     if (!vl.equals(r.valor)) {
-      divergencias.push({
-        chargeId: id,
-        motivo: "valor diferente",
-        local: vl.toFixed(2),
-        remoto: r.valor.toFixed(2),
-      });
+      divergencias.push({ chargeId: id, motivo: "valor diferente", local: vl.toFixed(2), remoto: r.valor.toFixed(2) });
     }
   }
   for (const c of locais) {
     if (!remotos.has(c.conexaId) && contaComoReceita(c as never)) {
-      divergencias.push({
-        chargeId: c.conexaId,
-        motivo: "sobrando no espelho",
-        local: valorFaturado(c as never).toFixed(2),
-      });
+      divergencias.push({ chargeId: c.conexaId, motivo: "sobrando no espelho", local: valorFaturado(c as never).toFixed(2) });
     }
   }
 
   const diferenca = localTotal.minus(remotoTotal);
 
+  // ⚠ Conjunto remoto VAZIO nunca é "bate".
+  //
+  // Zero do lado do Conexa quase sempre significa que a consulta não trouxe o
+  // que devia — filtro errado, permissão, indisponibilidade — e não que o mês
+  // não teve cobrança. Com o espelho também vazio, chamar isso de "bate" emite
+  // um atestado de correção sobre uma conferência que não aconteceu. Foi
+  // exatamente o modo de falha da primeira versão.
+  let veredicto: VeredictoReconciliacao;
+  let observacao: string | undefined;
+  if (remotos.size === 0) {
+    veredicto = "NADA_A_CONFERIR";
+    observacao =
+      locais.length > 0
+        ? `O Conexa devolveu ZERO cobranças com vencimento em ${mesKey}, mas o espelho tem ${locais.length}. Isso é divergência ou falha de consulta — não é "bate".`
+        : `O Conexa devolveu zero cobranças e o espelho também. Nada foi conferido: não confunda com "bate".`;
+  } else if (diferenca.isZero() && localReconhecidas.length === remotoReconhecidas.length) {
+    veredicto = "BATE";
+  } else {
+    veredicto = "DIVERGE";
+  }
+
   return {
     mesKey,
+    janela: "vencimento",
     localTotal: localTotal.toFixed(2),
     localContagem: localReconhecidas.length,
     remotoTotal: remotoTotal.toFixed(2),
     remotoContagem: remotoReconhecidas.length,
     diferenca: diferenca.toFixed(2),
-    // Bate = zero centavo E contagem idêntica. Só o total batendo esconde duas
-    // divergências que se cancelam.
-    bate: diferenca.isZero() && localReconhecidas.length === remotoReconhecidas.length,
+    veredicto,
     divergencias: divergencias.slice(0, 50),
     requisicoes,
+    observacao,
   };
 }
 
-function isoDe(d: Date): string {
+function iso(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
-
-export { money };
