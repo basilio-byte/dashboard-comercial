@@ -4,6 +4,48 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-26 — No ar, com identidade própria; e o bloqueio do vendedor
+
+**Deploy feito.** O sistema está rodando no Easypanel, porta 7000, com agendador
+embutido continuando a carga sozinho. Guia completo em
+[deploy-easypanel.md](deploy-easypanel.md).
+
+⚠ **O CI falhou 11 vezes antes disso**, em `COPY --from=builder /app/public`. Causa:
+**o git não versiona diretório vazio** — `public/` existia na máquina local (então o
+build local passava, o tempo todo) e não existia no checkout limpo. Resolvido com
+`public/robots.txt`, e a correção foi provada clonando o repositório limpo e
+buildando dali, em vez de confiar no build local.
+
+**Identidade própria.** O dono apontou que os nomes do menu lembravam o dashboard
+financeiro — e estava certo: "Panorama", "Receita" e "Reconciliação" são
+literalmente os nomes das telas de lá. Eu havia copiado a arquitetura de
+informação junto com a stack.
+
+Refeito a partir da pergunta que este sistema responde — *quem eu devo procurar
+hoje, e por quê?*: **Radar · Carteira · Gatilhos · Confiança · Motor**. A tela de
+Receita deixou de existir como destino; virou seção da Carteira, porque receita
+aqui é atributo do cliente, não relatório. "Gatilhos" é a palavra do próprio
+documento de especificação.
+
+A tela **Gatilhos** existe por um motivo: fila vazia precisa ser interpretável.
+Sem ela, "ninguém tem oportunidade" e "o motor está desligado" têm a mesma
+aparência — e a segunda, silenciosa, é como uma automação morre sem ninguém
+perceber.
+
+**Visual.** Parte do "está feio" era bug: a página não declarava `color-scheme`,
+então o Chrome aplicava auto dark mode e arruinava os contrastes. Sistema de
+cores refeito sobre a paleta validada, com papéis semânticos e zero cor crua.
+Verificado por captura nos dois esquemas, depois de login real.
+
+**Troca de senha**, que não existia, foi adicionada em `/minha-conta`.
+
+⚠ **BLOQUEIO NOVO: o vendedor responsável não é resolvível.** Ver
+[perguntas-abertas.md](perguntas-abertas.md). `sellerId` existe no dado mas a API
+não o resolve para um nome, e a tentativa via `/persons` foi **falso positivo** —
+devolveu contatos de clientes. Isso bloqueia a fase de roteamento.
+
+---
+
 ## 2026-08-26 — Sincronização por janela, e a descoberta de que a API não é ordenada
 
 **Os dois achados estruturais da auditoria, atacados.** A paginação por offset

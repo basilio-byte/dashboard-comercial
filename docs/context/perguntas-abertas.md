@@ -1,5 +1,37 @@
 # Perguntas abertas
 
+> 🔴 **BLOQUEIO NOVO (2026-08-26): quem é o vendedor responsável?**
+>
+> "O vendedor certo" está na definição do produto — é para ele que a task vai — e
+> é a peça **sem solução** hoje.
+>
+> **O que existe:** `contract.sellerId` e `sale.sellerId`, preenchidos em 814 de
+> 909 contratos, com 7 valores distintos (1, 30, 34, 35, 2745, 2758, 2930).
+>
+> **O que não existe:** endpoint que resolva esse id para um nome. Não há
+> `/sellers`, `/users` nem `/employees` na API v2.
+>
+> ⚠ **Falso positivo registrado:** consultar `/persons?id[]=...` com esses ids
+> devolve sete nomes e **parece** confirmação. Não é — os registros têm
+> `customerId` preenchido e `isIndividualCustomer: true`, ou seja, são **contatos
+> de clientes**, não funcionários. O id casou por coincidência de faixa. Quem
+> pegou o erro foi o dono do projeto, ao não reconhecer os nomes.
+>
+> **Duas perguntas, nesta ordem:**
+>
+> 1. **De onde vem o responsável ATUAL?** O documento de especificação diz que o
+>    ClickUp guarda "vendedor responsável" no CRM — essa é a fonte mais provável.
+>    ⚠ Mesmo resolvendo os nomes, `sellerId` é o vendedor **da época do
+>    contrato**: rotear por ele manda o sinal para quem fechou a venda há três
+>    anos, não para quem atende o cliente hoje.
+> 2. **Quem são os vendedores atuais**, nome a nome, e qual o `user_id` de cada
+>    um no ClickUp?
+>
+> Enquanto isso não estiver resolvido, a fila é **lida na tela**, sem roteamento
+> automático. Rotear errado é pior que não rotear: cria trabalho para quem não é
+> dono da conta e queima a confiança do time na estreia.
+
+
 Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem resposta trava a fase.
 
 > ✅ **Respondido em 2026-08-26 pelo responsável da Seahub** — as três incógnitas do ciclo da cota,
