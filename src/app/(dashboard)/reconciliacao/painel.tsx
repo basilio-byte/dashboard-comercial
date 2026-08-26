@@ -1,0 +1,98 @@
+"use client";
+import { useState, useTransition } from "react";
+import { acaoReconciliar } from "@/lib/operacao/actions";
+import type { ResultadoReconciliacao } from "@/lib/intel/reconciliar";
+import { rotuloMes } from "@/lib/dates";
+
+export function PainelReconciliacao({ meses }: { meses: string[] }) {
+  const [pendente, iniciar] = useTransition();
+  const [r, setR] = useState<ResultadoReconciliacao | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [mes, setMes] = useState(meses[0] ?? "");
+
+  const rodar = () => {
+    setErro(null);
+    setR(null);
+    iniciar(async () => {
+      try {
+        setR(await acaoReconciliar(mes));
+      } catch (e) {
+        setErro(e instanceof Error ? e.message : String(e));
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-sm">
+          <span className="block text-neutral-600">Mês fechado</span>
+          <select
+            value={mes}
+            onChange={(e) => setMes(e.target.value)}
+            className="mt-1 rounded border border-neutral-300 px-3 py-1.5 text-sm"
+          >
+            {meses.map((m) => (
+              <option key={m} value={m}>
+                {rotuloMes(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={rodar}
+          disabled={pendente || !mes}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 disabled:opacity-50"
+        >
+          {pendente ? "Conferindo… (pode levar minutos)" : "Conferir contra o Conexa"}
+        </button>
+      </div>
+
+      {erro ? <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-800">{erro}</p> : null}
+
+      {r ? (
+        <div
+          className={`rounded border px-4 py-3 ${
+            r.bate ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+          }`}
+        >
+          <p className="font-medium">
+            {r.bate ? `✓ ${rotuloMes(r.mesKey)} bate` : `✗ ${rotuloMes(r.mesKey)} DIVERGE`}
+          </p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+            <Par t="Local" v={`R$ ${r.localTotal}`} sub={`${r.localContagem} cobranças`} />
+            <Par t="Conexa" v={`R$ ${r.remotoTotal}`} sub={`${r.remotoContagem} cobranças`} />
+            <Par t="Diferença" v={`R$ ${r.diferenca}`} />
+            <Par t="Requisições" v={String(r.requisicoes)} />
+          </dl>
+
+          {r.divergencias.length ? (
+            <div className="mt-3">
+              <p className="text-sm font-medium">Divergências (até 50)</p>
+              <ul className="mt-1 space-y-0.5 text-xs text-neutral-700">
+                {r.divergencias.map((d) => (
+                  <li key={`${d.chargeId}-${d.motivo}`}>
+                    cobrança <strong>{d.chargeId}</strong> — {d.motivo}
+                    {d.local ? ` · local R$ ${d.local}` : ""}
+                    {d.remoto ? ` · Conexa R$ ${d.remoto}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Par({ t, v, sub }: { t: string; v: string; sub?: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-neutral-500">{t}</dt>
+      <dd className="font-medium tabular-nums">{v}</dd>
+      {sub ? <dd className="text-xs text-neutral-500">{sub}</dd> : null}
+    </div>
+  );
+}

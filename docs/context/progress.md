@@ -4,6 +4,51 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-26 — Fase 1: espelho, métricas e telas
+
+**Feito.** Espelho local do Conexa (clientes, contratos, planos, produtos, categorias, empresas,
+vendas, cobranças), consolidação da inteligência comercial, autenticação e as seis telas.
+
+**Estrutura.**
+
+- `src/lib/money.ts` e `dates.ts` — dinheiro em Decimal, datas no relógio de parede da empresa.
+- `src/lib/conexa/client.ts` — somente leitura por construção (método fixo em `GET`, sem `method`
+  nem `body`), limitador a 15 req/min, retry em 429/5xx, paginação por `hasNext` com offset inicial
+  para retomada.
+- `src/lib/conexa/sync.ts` — cursor persistido em `SyncState` a cada página, gravado **depois** do
+  upsert (morrer entre as duas coisas reprocessa a página, o que é inofensivo; o contrário pularia
+  registros). Heartbeat no `SyncRun` para o enterro de zumbis não depender de "um container só".
+- `src/lib/metrics/receita.ts` — a régua, como funções puras. 18 testes.
+- `src/lib/intel/consolidar.ts` — receita mensal e perfil, materializados.
+- `src/lib/intel/reconciliar.ts` — confere o espelho contra o Conexa, cobrança por cobrança.
+
+**Critérios de aceite verificados no container real, com Postgres:**
+
+| Critério | Resultado |
+|---|---|
+| `GET /api/health` → 200 | ✅ `{"status":"ok","db":"ok","env":"ok",…}` |
+| Raiz redireciona para login | ✅ 307 → `/login` (e também `/clientes`, `/operacao`) |
+| `POST /api/sync` sem segredo | ✅ 503 sem `CRON_SECRET`; 401 com segredo errado |
+| Variação `NULL` quando o anterior é zero | ✅ teste dedicado |
+| Mês corrente nunca alimenta tendência | ✅ teste no dia 3, virada de ano e último dia do mês |
+| Nenhum número sem selo de procedência | ✅ componente `<Procedencia>` em todas as telas |
+| Camada de disparo não existe | ✅ nem o diretório |
+
+**Sincronizado contra a API de produção** (somente leitura, 7 requisições): 260 planos, 120
+produtos, 25 categorias, 2 empresas. O mapeamento de cota bate com a Fase 0 no dado real:
+Litoral **sem cota**, Batial **2h**, Abissal **8h**. "Panteão" está no espelho (3380 e 3381).
+
+**Decisão de modelagem que vale registrar.** `Plan.horasInclusasMes` é `null` para plano **sem
+cota**, e isso é diferente de zero: "sem horas inclusas" é característica do produto (é o Litoral),
+"zero hora" seria uma cota vazia. A UI mostra "sem cota", nunca "0h". A regra 10 depende
+inteiramente dessa distinção.
+
+**Pendente para fechar a fase:** a reconciliação ao centavo contra um mês fechado exige o backfill
+COMPLETO de cobranças — a tela está pronta e o critério é diferença de R$ 0,00 **e** contagem
+idêntica (só o total batendo esconderia duas divergências que se cancelam).
+
+---
+
 ## 2026-08-25 — Fase 0 executada · veredito GO
 
 Rodadas as provas de acesso contra a **API de produção**, com token de admin, somente leitura
