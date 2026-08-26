@@ -1,7 +1,9 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { usuarioAtual } from "@/lib/auth/session";
-import { syncBackfill, syncDimensoes } from "@/lib/conexa/sync";
+import { syncDimensoes } from "@/lib/conexa/sync";
+import { cargaHistorica, sincronizarIncremental } from "@/lib/conexa/sync-janelas";
+import type { Entidade } from "@/lib/conexa/janelas";
 import { consolidarTudo } from "@/lib/intel/consolidar";
 import { reconciliarMes, type ResultadoReconciliacao } from "@/lib/intel/reconciliar";
 
@@ -21,10 +23,21 @@ export async function acaoSincronizarCadastros() {
 
 export async function acaoBackfill(entidades?: string[]) {
   await exigirAdmin();
-  // Teto de páginas por execução: a carga cabe numa janela e não monopoliza o
-  // rate limit compartilhado com o financeiro. Retomável — basta rodar de novo.
-  const r = await syncBackfill({ maxPaginasPorEntidade: 25, entidades });
+  // Teto de JANELAS por execução: cabe no tempo de um request e o progresso
+  // fica gravado por janela, então rodar de novo continua de onde parou.
+  const r = await cargaHistorica({
+    entidades: entidades as Entidade[] | undefined,
+    maxJanelas: 8,
+  });
   revalidatePath("/operacao");
+  return r;
+}
+
+export async function acaoIncremental() {
+  await exigirAdmin();
+  const r = await sincronizarIncremental();
+  revalidatePath("/operacao");
+  revalidatePath("/");
   return r;
 }
 

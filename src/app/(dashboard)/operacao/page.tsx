@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { usuarioAtual } from "@/lib/auth/session";
-import { backfillPendente } from "@/lib/conexa/sync";
+import { progressoDaCarga } from "@/lib/conexa/sync-janelas";
 import { PainelOperacao } from "./painel";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +11,9 @@ export default async function Operacao() {
   const usuario = await usuarioAtual();
   const admin = usuario?.role === "ADMIN";
 
-  const [runs, pendentes, contagens] = await Promise.all([
+  const [runs, progresso, contagens] = await Promise.all([
     prisma.syncRun.findMany({ orderBy: { startedAt: "desc" }, take: 15 }),
-    backfillPendente(),
+    progressoDaCarga(),
     Promise.all([
       prisma.customer.count(),
       prisma.contract.count(),
@@ -52,12 +52,56 @@ export default async function Operacao() {
         </div>
       ) : null}
 
-      {pendentes.length ? (
-        <div className="rounded border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          <strong>Backfill em andamento</strong> ({pendentes.join(", ")}). O cursor está salvo — rodar de
-          novo continua de onde parou, não recomeça.
+      <section>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          Progresso da carga, por janela mensal
+        </h2>
+        <div className="mt-3 overflow-x-auto rounded border border-neutral-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">Entidade</th>
+                <th className="px-4 py-2">Progresso</th>
+                <th className="px-4 py-2 text-right font-medium">Janelas</th>
+                <th className="px-4 py-2 text-right font-medium">Registros</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {progresso.map((p) => {
+                const pct = p.total ? Math.round((p.concluidas / p.total) * 100) : 0;
+                return (
+                  <tr key={p.entidade}>
+                    <td className="px-4 py-2">{p.entidade}</td>
+                    <td className="px-4 py-2">
+                      <div className="h-2 w-full max-w-xs rounded bg-neutral-100">
+                        <div
+                          className={pct === 100 ? "h-2 rounded bg-emerald-600" : "h-2 rounded bg-sky-600"}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {p.total === 0 ? (
+                        <span className="text-neutral-400">não iniciada</span>
+                      ) : (
+                        `${p.concluidas}/${p.total}`
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right tabular-nums">
+                      {p.registros.toLocaleString("pt-BR")}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      ) : null}
+        <p className="mt-2 text-xs text-neutral-500">
+          Completude é <strong>todas as janelas concluídas</strong>, não &quot;o cursor chegou ao
+          fim&quot;. A diferença importa: o cursor chega ao fim mesmo tendo pulado registros, e
+          nenhuma conferência era possível depois. Uma janela pode ser reprocessada.
+        </p>
+      </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <Contador rotulo="Clientes" n={clientes} />
@@ -78,8 +122,10 @@ export default async function Operacao() {
           <Item termo="Modo de disparo" valor={env.NOTIFICADOR_MODO} />
         </dl>
         <p className="mt-2 text-xs text-neutral-500">
-          O teto de 60 req/min do Conexa é da <strong>conta</strong> e é dividido com o Dashboard
-          Financeiro, que já roda em produção. Por isso o ritmo aqui é conservador. Ver ADR-0002.
+          Teto medido da API: <strong>60 req/min</strong>. Em 22 janelas consecutivas medidas em
+          2026-08-26, o consumo de terceiros foi <strong>zero</strong> — o financeiro em produção usa
+          login web, não a API v2. O ritmo configurado é um teto, não um alvo: em regime o comercial
+          gasta ~50 requisições por dia. A folga existe para a rajada futura dos agentes do Chatwoot.
         </p>
       </section>
 

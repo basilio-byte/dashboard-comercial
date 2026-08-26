@@ -1,5 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import { currentMonthKey } from "@/lib/dates";
+import { gerarJanelas } from "@/lib/conexa/janelas";
 
 /**
  * SELO DE COMPLETUDE (ADR-0011).
@@ -24,10 +26,11 @@ export type Entidade = (typeof ENTIDADES)[number];
 
 export interface EstadoEntidade {
   entidade: Entidade;
-  /** Backfill terminou (sem cursor pendente) E houve ao menos uma carga. */
+  /** Todas as janelas do período estão CONCLUIDA. */
   completa: boolean;
-  /** Onde o cursor parou, quando incompleta. */
-  cursor: number | null;
+  /** Janelas mensais previstas para o histórico da entidade. */
+  janelasTotais: number;
+  janelasConcluidas: number;
   registros: number;
 }
 
@@ -48,22 +51,41 @@ const CONTADOR: Record<Entidade, () => Promise<number>> = {
   bookings: () => prisma.roomBooking.count(),
 };
 
+/**
+ * ⚠ Completude agora é "todas as janelas mensais estão CONCLUIDA".
+ *
+ * A versão anterior perguntava "o cursor de offset sumiu?" — e o cursor some ao
+ * fim da varredura mesmo que ela tenha PULADO registros (uma deleção no ERP
+ * desloca a paginação e o registro na posição do cursor nunca é lido). Ou seja:
+ * o selo antigo certificava o fim da varredura, não a completude do dado.
+ *
+ * Com janelas, a afirmação é verificável e re-executável: dá para reprocessar
+ * uma janela e conferir.
+ */
 export async function estadoDoEspelho(): Promise<EstadoEspelho> {
-  const estados = await prisma.syncState.findMany({
-    where: { key: { in: ENTIDADES.map((e) => `${e}:offset`) } },
+  const janelas = await prisma.syncWindow.findMany({
+    select: { entidade: true, janela: true, status: true, registros: true },
   });
-  const cursorPor = new Map(estados.map((e) => [e.key.replace(":offset", ""), Number(e.cursor ?? 0)]));
+  const inicios = await prisma.syncState.findMany({
+    where: { key: { startsWith: "janela-inicial:" } },
+  });
+  const inicioPor = new Map(inicios.map((i) => [i.key.replace("janela-inicial:", ""), i.cursor]));
 
   const entidades: EstadoEntidade[] = [];
   for (const entidade of ENTIDADES) {
     const registros = await CONTADOR[entidade]();
-    const cursor = cursorPor.has(entidade) ? cursorPor.get(entidade)! : null;
+    const minhas = janelas.filter((j) => j.entidade === entidade);
+    const concluidas = minhas.filter((j) => j.status === "CONCLUIDA").length;
+    const inicio = inicioPor.get(entidade);
+    // Sem início descoberto, a carga nunca rodou: total desconhecido, e
+    // "desconhecido" nunca é "completo".
+    const totais = inicio ? gerarJanelas(inicio, currentMonthKey()).length : 0;
+
     entidades.push({
       entidade,
-      // Cursor presente = backfill parou no meio. Cursor ausente + zero registro
-      // = nunca rodou. Completa exige as duas coisas.
-      completa: cursor === null && registros > 0,
-      cursor,
+      completa: totais > 0 && concluidas >= totais && registros > 0,
+      janelasTotais: totais,
+      janelasConcluidas: concluidas,
       registros,
     });
   }

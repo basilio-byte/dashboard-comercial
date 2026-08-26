@@ -10,6 +10,9 @@ CREATE TYPE "Procedencia" AS ENUM ('API', 'DERIVADO', 'MANUAL', 'INDISPONIVEL');
 -- CreateEnum
 CREATE TYPE "SyncStatus" AS ENUM ('RUNNING', 'SUCCESS', 'FAILED', 'HALTED');
 
+-- CreateEnum
+CREATE TYPE "JanelaStatus" AS ENUM ('PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDA', 'FALHOU');
+
 -- CreateTable
 CREATE TABLE "users" (
     "id" TEXT NOT NULL,
@@ -268,6 +271,21 @@ CREATE TABLE "sync_runs" (
 );
 
 -- CreateTable
+CREATE TABLE "sync_windows" (
+    "entidade" TEXT NOT NULL,
+    "janela" TEXT NOT NULL,
+    "status" "JanelaStatus" NOT NULL DEFAULT 'PENDENTE',
+    "offset" INTEGER NOT NULL DEFAULT 0,
+    "registros" INTEGER NOT NULL DEFAULT 0,
+    "erro" TEXT,
+    "iniciadaEm" TIMESTAMP(3),
+    "concluidaEm" TIMESTAMP(3),
+    "atualizadaEm" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "sync_windows_pkey" PRIMARY KEY ("entidade","janela")
+);
+
+-- CreateTable
 CREATE TABLE "sync_state" (
     "key" TEXT NOT NULL,
     "cursor" TEXT,
@@ -375,6 +393,9 @@ CREATE INDEX "sync_runs_entity_status_finishedAt_idx" ON "sync_runs"("entity", "
 
 -- CreateIndex
 CREATE INDEX "sync_runs_startedAt_idx" ON "sync_runs"("startedAt");
+
+-- CreateIndex
+CREATE INDEX "sync_windows_entidade_status_idx" ON "sync_windows"("entidade", "status");
 
 -- AddForeignKey
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;

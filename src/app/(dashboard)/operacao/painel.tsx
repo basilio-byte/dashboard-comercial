@@ -1,6 +1,11 @@
 "use client";
 import { useState, useTransition } from "react";
-import { acaoBackfill, acaoConsolidar, acaoSincronizarCadastros } from "@/lib/operacao/actions";
+import {
+  acaoBackfill,
+  acaoConsolidar,
+  acaoIncremental,
+  acaoSincronizarCadastros,
+} from "@/lib/operacao/actions";
 
 export function PainelOperacao() {
   const [pendente, iniciar] = useTransition();
@@ -23,7 +28,9 @@ export function PainelOperacao() {
       <h2 className="text-sm font-medium">Ações</h2>
       <p className="mt-1 text-xs text-neutral-500">
         Na ordem: cadastros primeiro (tudo depende deles), depois a carga, depois a consolidação.
-        A carga tem teto por execução — rodar de novo continua de onde parou.
+        A carga é feita <strong>por janela mensal</strong>, da mais recente para a mais antiga, com
+        teto por execução — rodar de novo continua de onde parou. O incremental reprocessa só as
+        janelas recentes e é o que um cron deve chamar.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Botao onClick={rodar(acaoSincronizarCadastros, "Cadastros")} disabled={pendente}>
@@ -34,6 +41,9 @@ export function PainelOperacao() {
         </Botao>
         <Botao onClick={rodar(acaoConsolidar, "Consolidação")} disabled={pendente}>
           3 · Consolidar inteligência
+        </Botao>
+        <Botao onClick={rodar(acaoIncremental, "Incremental")} disabled={pendente}>
+          Atualizar (incremental)
         </Botao>
       </div>
       {saida ? (

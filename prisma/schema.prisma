@@ -429,6 +429,40 @@ model SyncRun {
   @@map("sync_runs")
 }
 
+/// Progresso da sincronização por ENTIDADE e JANELA mensal.
+///
+/// Substitui o cursor de offset global, que tinha um buraco: uma deleção no
+/// Conexa deslocava a paginação e o registro na posição do cursor nunca era
+/// lido — e no fim o sistema declarava a entidade completa. Com janelas, o
+/// deslocamento fica contido num mês e reprocessar é barato e idempotente.
+///
+/// Completude passa a ser "todas as janelas do período estão CONCLUIDA", que é
+/// verificável, em vez de "o cursor chegou ao fim", que não é.
+model SyncWindow {
+  entidade  String
+  /// 'yyyy-MM'
+  janela    String
+  status    JanelaStatus @default(PENDENTE)
+  /// Offset já consumido DENTRO da janela — permite retomar no meio dela.
+  offset    Int          @default(0)
+  registros Int          @default(0)
+  erro      String?
+  iniciadaEm DateTime?
+  concluidaEm DateTime?
+  atualizadaEm DateTime @updatedAt
+
+  @@id([entidade, janela])
+  @@index([entidade, status])
+  @@map("sync_windows")
+}
+
+enum JanelaStatus {
+  PENDENTE
+  EM_ANDAMENTO
+  CONCLUIDA
+  FALHOU
+}
+
 /// Cursor de retomada por entidade/janela.
 ///
 /// Sem isto o backfill sempre parte do offset 0 — e como o container morre em

@@ -1,11 +1,16 @@
 import type { ConsumoDoCiclo } from "@/lib/metrics/horas";
-import type { HorasDoCliente } from "@/lib/intel/horas";
+import type { HorasDoCliente, HorasDoContrato } from "@/lib/intel/horas";
 import { Procedencia } from "@/components/Procedencia";
 
 const h = (v: { toFixed: (n: number) => string } | null) =>
   v === null ? "—" : `${Number(v.toFixed(2))}h`.replace(".", ",");
 
-/** Bloco de horas do cliente: cota, ciclo atual e histórico de ciclos. */
+/**
+ * Horas do cliente, **um bloco por contrato**.
+ *
+ * Cada contrato tem o seu ciclo, ancorado na data de contratação dele. Juntar
+ * tudo num bloco só misturaria janelas que não coincidem.
+ */
 export function BlocoHoras({ dados, confiavel }: { dados: HorasDoCliente; confiavel: boolean }) {
   if (dados.semContrato) {
     return (
@@ -24,44 +29,14 @@ export function BlocoHoras({ dados, confiavel }: { dados: HorasDoCliente; confia
     );
   }
 
-  const semCota = dados.concedido === null;
-
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-6 text-sm">
-        <div>
-          <div className="text-xs text-neutral-500">Plano</div>
-          <div className="font-medium">{dados.planoNome ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-xs text-neutral-500">Cota por ciclo</div>
-          <div className="font-medium">
-            {semCota ? (
-              <span title="Plano sem horas inclusas — é o desenho do Endereço Fiscal Litoral">
-                sem cota
-              </span>
-            ) : (
-              h(dados.concedido)
-            )}
-          </div>
-        </div>
-        {dados.sinal?.usoMedioPct !== null && dados.sinal?.usoMedioPct !== undefined ? (
-          <div>
-            <div className="text-xs text-neutral-500">Uso médio da cota</div>
-            <div
-              className={`font-medium ${dados.sinal.usoMedioPct > 100 ? "text-red-700" : ""}`}
-            >
-              {dados.sinal.usoMedioPct.toFixed(0)}%
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {dados.fechados.some((c) => !c.conclusivo) ? (
+    <div className="space-y-6">
+      {dados.atribuicaoAmbigua ? (
         <div className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <strong>Há ciclos não conclusivos.</strong> Alguma reserva não pôde ser classificada —
-          duração ausente ou status fora dos documentados. Esses ciclos <strong>não</strong> contam
-          para o sinal de excedente: um ciclo com buraco não confirma nem nega estouro.
+          <strong>Atribuição ambígua.</strong> Este cliente tem mais de um contrato com cota, e a
+          reserva não diz de qual balde a hora saiu. O consumo aparece repetido em cada bloco
+          abaixo, porque é o consumo do cliente inteiro — <strong>não</strong> é conclusivo por
+          contrato, e este cliente fica de fora da fila automática.
         </div>
       ) : null}
 
@@ -73,34 +48,93 @@ export function BlocoHoras({ dados, confiavel }: { dados: HorasDoCliente; confia
         </div>
       ) : null}
 
-      <TabelaCiclos ciclos={dados.fechados} atual={dados.cicloAtual} semCota={semCota} />
+      {dados.contratos.map((c) => (
+        <BlocoContrato key={c.contratoConexaId} contrato={c} />
+      ))}
 
       <p className="text-xs text-neutral-500">
         <Procedencia tipo="API" detalhe="plan.hourQuotas" /> cota ·{" "}
         <Procedencia tipo="DERIVADO" detalhe="soma das reservas por ciclo" /> consumo. O ciclo é
-        ancorado na <strong>data de contratação</strong>, não no mês. Sem carry-over: horas não
-        usadas expiram. O excedente é o que o Conexa <strong>faturou</strong>, não uma conta nossa.
+        ancorado na <strong>data de contratação de cada contrato</strong>, não no mês. Sem
+        carry-over: horas não usadas expiram. O excedente é o que o Conexa{" "}
+        <strong>faturou</strong>, não uma conta nossa.
       </p>
     </div>
   );
 }
 
-function TabelaCiclos({
-  ciclos,
-  atual,
-  semCota,
-}: {
-  ciclos: ConsumoDoCiclo[];
-  atual: ConsumoDoCiclo | null;
-  semCota: boolean;
-}) {
-  const linhas = [...ciclos, ...(atual ? [atual] : [])];
-  if (!linhas.length) return <p className="text-sm text-neutral-500">Nenhum ciclo fechado ainda.</p>;
+function BlocoContrato({ contrato }: { contrato: HorasDoContrato }) {
+  const semCota = contrato.concedido === null;
+  const linhas = [...contrato.fechados, ...(contrato.cicloAtual ? [contrato.cicloAtual] : [])];
 
   return (
-    <div className="overflow-x-auto rounded border border-neutral-200 bg-white">
+    <div className="rounded border border-neutral-200 bg-white">
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 border-b border-neutral-100 px-4 py-3">
+        <div>
+          <div className="text-xs text-neutral-500">Plano</div>
+          <div className="text-sm font-medium">{contrato.planoNome ?? "—"}</div>
+        </div>
+        <div>
+          <div className="text-xs text-neutral-500">Cota por ciclo</div>
+          <div className="text-sm font-medium">
+            {semCota ? (
+              <span title="Plano sem horas inclusas — é o desenho do Endereço Fiscal Litoral">
+                sem cota
+              </span>
+            ) : (
+              h(contrato.concedido)
+            )}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-neutral-500">Contrato desde</div>
+          <div className="text-sm font-medium tabular-nums">
+            {new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(contrato.inicio)}
+          </div>
+        </div>
+        {contrato.sinal?.usoMedioPct != null ? (
+          <div>
+            <div className="text-xs text-neutral-500">Uso médio da cota</div>
+            <div
+              className={`text-sm font-medium ${contrato.sinal.usoMedioPct > 100 ? "text-red-700" : ""}`}
+            >
+              {contrato.sinal.usoMedioPct.toFixed(0)}%
+            </div>
+          </div>
+        ) : null}
+        <div className="ml-auto text-xs text-neutral-400">#{contrato.contratoConexaId}</div>
+      </div>
+
+      {contrato.fechados.some((c) => !c.conclusivo) ? (
+        <p className="border-b border-neutral-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+          <strong>Ciclos não conclusivos.</strong> Alguma reserva não pôde ser classificada —
+          duração ausente ou status fora dos documentados. Esses ciclos não contam para o sinal: um
+          ciclo com buraco não confirma nem nega estouro.
+        </p>
+      ) : null}
+
+      {linhas.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-neutral-500">Nenhum ciclo fechado ainda.</p>
+      ) : (
+        <TabelaCiclos linhas={linhas} temAtual={contrato.cicloAtual !== null} semCota={semCota} />
+      )}
+    </div>
+  );
+}
+
+function TabelaCiclos({
+  linhas,
+  temAtual,
+  semCota,
+}: {
+  linhas: ConsumoDoCiclo[];
+  temAtual: boolean;
+  semCota: boolean;
+}) {
+  return (
+    <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+        <thead className="border-b border-neutral-100 text-left text-xs uppercase tracking-wide text-neutral-500">
           <tr>
             <th className="px-4 py-2 font-medium">Ciclo</th>
             <th className="px-4 py-2 text-right font-medium">Reservas</th>
@@ -112,7 +146,7 @@ function TabelaCiclos({
         </thead>
         <tbody className="divide-y divide-neutral-100">
           {linhas.map((c, i) => {
-            const eAtual = atual !== null && i === linhas.length - 1;
+            const eAtual = temAtual && i === linhas.length - 1;
             return (
               <tr key={c.ciclo.rotulo + i} className={eAtual ? "bg-amber-50/50" : ""}>
                 <td className="px-4 py-2 whitespace-nowrap">

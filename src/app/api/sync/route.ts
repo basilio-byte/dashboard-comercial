@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getEnv } from "@/lib/env";
-import { syncBackfill, syncDimensoes } from "@/lib/conexa/sync";
+import { syncDimensoes } from "@/lib/conexa/sync";
+import { cargaHistorica, sincronizarIncremental } from "@/lib/conexa/sync-janelas";
+import type { Entidade } from "@/lib/conexa/janelas";
 import { consolidarTudo } from "@/lib/intel/consolidar";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +28,10 @@ export async function POST(req: NextRequest) {
   }
 
   const params = new URL(req.url).searchParams;
-  // ⚠ O default era "reconcile", que NÃO tem case no switch — `POST /api/sync`
-  // sem query string, que é o uso óbvio de um cron, devolvia 400 e não
-  // sincronizava nada. A sincronização incremental ainda não existe (ver
-  // roadmap); até existir, o default útil é atualizar os cadastros.
-  const modo = params.get("mode") ?? "dimensions";
+  // O default é o incremental: `POST /api/sync` sem query string é o uso óbvio
+  // de um cron, e agora ele faz a coisa certa. (Antes o default era "reconcile",
+  // que não tinha implementação e devolvia 400.)
+  const modo = params.get("mode") ?? "incremental";
   // `entity=bookings,contracts` restringe a carga — permite priorizar quando o
   // ritmo é conservador e a fila inteira levaria horas.
   const entidades = params.get("entity")?.split(",").map((s) => s.trim()).filter(Boolean);
@@ -38,8 +39,19 @@ export async function POST(req: NextRequest) {
     switch (modo) {
       case "dimensions":
         return NextResponse.json(await syncDimensoes());
+      case "incremental":
+        return NextResponse.json(
+          await sincronizarIncremental({ entidades: entidades as Entidade[] | undefined }),
+        );
       case "backfill":
-        return NextResponse.json(await syncBackfill({ maxPaginasPorEntidade: 50, entidades }));
+        // Teto de janelas por chamada: cabe folgado em `maxDuration` e o
+        // progresso fica gravado, então chamar de novo continua de onde parou.
+        return NextResponse.json(
+          await cargaHistorica({
+            entidades: entidades as Entidade[] | undefined,
+            maxJanelas: Number(params.get("windows") ?? 12),
+          }),
+        );
       case "intelligence":
         return NextResponse.json(await consolidarTudo());
       default:
