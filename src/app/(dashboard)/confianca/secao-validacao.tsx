@@ -1,8 +1,5 @@
-import { usuarioAtual } from "@/lib/auth/session";
 import { amostraDeValidacao } from "@/lib/intel/validar-horas";
 import { Procedencia } from "@/components/Procedencia";
-
-export const dynamic = "force-dynamic";
 
 /**
  * Tela de VALIDAÇÃO do saldo de horas contra a tela do Conexa.
@@ -12,26 +9,21 @@ export const dynamic = "force-dynamic";
  *
  * Ela não valida sozinha — torna a validação possível, que é diferente.
  */
-export default async function Validacao() {
-  const usuario = await usuarioAtual();
-  if (usuario?.role !== "ADMIN") {
-    return <p className="text-sm text-neutral-500">Restrito a administradores.</p>;
-  }
-
+export async function SecaoValidacao() {
   const amostra = await amostraDeValidacao(20);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Validação do saldo de horas</h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <h2 className="text-[17px] font-semibold tracking-tight">Validação do saldo de horas</h2>
+        <p className="mt-1 text-sm text-[var(--tinta-2)]">
           O saldo é <strong>derivado</strong> (cota do plano menos as horas que o Conexa marcou como
           abatidas), com o ciclo ancorado na data de contratação. Esta tela existe para conferir
           esse número contra a tela do Conexa, cliente por cliente.
         </p>
       </div>
 
-      <div className="rounded border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700">
+      <div className="cartao px-4 py-3 text-sm text-[var(--tinta-2)]">
         <p>
           <strong>Como conferir.</strong> Para cada linha, abrir o cliente no Conexa, olhar o pacote
           de horas do ciclo indicado e comparar o <strong>saldo</strong>. Anotar apenas se bate ou
@@ -50,23 +42,23 @@ export default async function Validacao() {
       </div>
 
       {amostra.bloqueio ? (
-        <div className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded border border-[color-mix(in_oklab,var(--atencao)_35%,transparent)] bg-[var(--wash-atencao)] px-4 py-3 text-sm text-[var(--atencao-tinta)]">
           <strong>Amostra bloqueada.</strong> {amostra.bloqueio}
         </div>
       ) : amostra.linhas.length === 0 ? (
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-[var(--tinta-3)]">
           Nenhum contrato ativo com cota de horas no espelho ainda.
         </p>
       ) : (
         <>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-[var(--tinta-3)]">
             {amostra.linhas.length} linhas, de {amostra.comCota} clientes com cota. Priorizadas as
             que tiveram movimento no ciclo — saldo intacto não exercita o cálculo.
           </p>
 
-          <div className="overflow-x-auto rounded border border-neutral-200 bg-white">
-            <table className="w-full text-sm">
-              <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+          <div className="overflow-x-auto cartao">
+            <table className="tabela">
+              <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
                 <tr>
                   <th className="px-3 py-2 font-medium">Cliente</th>
                   <th className="px-3 py-2 font-medium">Plano</th>
@@ -79,37 +71,37 @@ export default async function Validacao() {
                   <th className="px-3 py-2 font-medium">Ressalva</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-[var(--linha)]">
                 {amostra.linhas.map((l) => (
                   <tr key={`${l.customerConexaId}-${l.contratoConexaId}`}>
                     <td className="px-3 py-2">
-                      <span className="text-neutral-400">#{l.customerConexaId}</span>{" "}
+                      <span className="text-[var(--tinta-3)]">#{l.customerConexaId}</span>{" "}
                       {l.nome ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-neutral-600">{l.planoNome ?? "—"}</td>
-                    <td className="px-3 py-2 whitespace-nowrap text-neutral-600">
+                    <td className="px-3 py-2 text-[var(--tinta-2)]">{l.planoNome ?? "—"}</td>
+                    <td className="px-3 py-2 whitespace-nowrap text-[var(--tinta-2)]">
                       {l.cicloInicio} a {l.cicloFim}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.concedido}h</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-neutral-500">
+                    <td className="px-3 py-2 text-right num">{l.concedido}h</td>
+                    <td className="px-3 py-2 text-right num text-[var(--tinta-3)]">
                       {l.reservasNoCiclo}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.abatido}h</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.faturado}h</td>
-                    <td className="px-3 py-2 text-right font-medium tabular-nums">
+                    <td className="px-3 py-2 text-right num">{l.abatido}h</td>
+                    <td className="px-3 py-2 text-right num">{l.faturado}h</td>
+                    <td className="px-3 py-2 text-right font-medium num">
                       {l.saldoDerivado === null ? "—" : `${l.saldoDerivado}h`}
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {!l.conclusivo ? (
-                        <span className="text-amber-700" title={`${l.naoClassificado}h não classificadas`}>
+                        <span className="text-[var(--atencao-tinta)]" title={`${l.naoClassificado}h não classificadas`}>
                           não conclusivo
                         </span>
                       ) : l.ambiguo ? (
-                        <span className="text-amber-700" title="Cliente tem mais de um contrato com cota">
+                        <span className="text-[var(--atencao-tinta)]" title="Cliente tem mais de um contrato com cota">
                           atribuição ambígua
                         </span>
                       ) : (
-                        <span className="text-neutral-400">—</span>
+                        <span className="text-[var(--tinta-3)]">—</span>
                       )}
                     </td>
                   </tr>
@@ -118,7 +110,7 @@ export default async function Validacao() {
             </table>
           </div>
 
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-[var(--tinta-3)]">
             <Procedencia tipo="API" detalhe="plan.hourQuotas" /> cota ·{" "}
             <Procedencia tipo="API" detalhe="booking.status = deductedFromQuota" /> abatido ·{" "}
             <Procedencia tipo="DERIVADO" detalhe="cota − abatido" /> saldo. Linha marcada como{" "}

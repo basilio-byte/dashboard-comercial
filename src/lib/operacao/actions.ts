@@ -17,7 +17,7 @@ async function exigirAdmin() {
 export async function acaoSincronizarCadastros() {
   await exigirAdmin();
   const r = await syncDimensoes();
-  revalidatePath("/operacao");
+  revalidatePath("/motor");
   return r;
 }
 
@@ -29,14 +29,14 @@ export async function acaoBackfill(entidades?: string[]) {
     entidades: entidades as Entidade[] | undefined,
     maxJanelas: 8,
   });
-  revalidatePath("/operacao");
+  revalidatePath("/motor");
   return r;
 }
 
 export async function acaoIncremental() {
   await exigirAdmin();
   const r = await sincronizarIncremental();
-  revalidatePath("/operacao");
+  revalidatePath("/motor");
   revalidatePath("/");
   return r;
 }
@@ -44,7 +44,7 @@ export async function acaoIncremental() {
 export async function acaoConsolidar() {
   await exigirAdmin();
   const r = await consolidarTudo();
-  revalidatePath("/operacao");
+  revalidatePath("/motor");
   revalidatePath("/");
   return r;
 }

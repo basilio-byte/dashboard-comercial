@@ -26,11 +26,11 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-sm">
-          <span className="block text-neutral-600">Mês fechado</span>
+          <span className="block text-[var(--tinta-2)]">Mês fechado</span>
           <select
             value={mes}
             onChange={(e) => setMes(e.target.value)}
-            className="mt-1 rounded border border-neutral-300 px-3 py-1.5 text-sm"
+            className="mt-1 rounded border border-[var(--linha)] px-3 py-1.5 text-sm"
           >
             {meses.map((m) => (
               <option key={m} value={m}>
@@ -43,22 +43,22 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
           type="button"
           onClick={rodar}
           disabled={pendente || !mes}
-          className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 disabled:opacity-50"
+          className="rounded border border-[var(--linha)] px-3 py-1.5 text-sm hover:bg-[var(--superficie-sutil)] disabled:opacity-50"
         >
           {pendente ? "Conferindo… (pode levar minutos)" : "Conferir contra o Conexa"}
         </button>
       </div>
 
-      {erro ? <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-800">{erro}</p> : null}
+      {erro ? <p className="rounded faixa faixa-critico">{erro}</p> : null}
 
       {r ? (
         <div
           className={`rounded border px-4 py-3 ${
             r.veredicto === "BATE"
-              ? "border-emerald-200 bg-emerald-50"
+              ? "faixa-bom"
               : r.veredicto === "DIVERGE"
-                ? "border-red-200 bg-red-50"
-                : "border-amber-300 bg-amber-50"
+                ? "border-[color-mix(in_oklab,var(--critico)_35%,transparent)] bg-[var(--wash-critico)]"
+                : "border-[color-mix(in_oklab,var(--atencao)_35%,transparent)] bg-[var(--wash-atencao)]"
           }`}
         >
           <p className="font-medium">
@@ -79,7 +79,7 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
           {r.divergencias.length ? (
             <div className="mt-3">
               <p className="text-sm font-medium">Divergências (até 50)</p>
-              <ul className="mt-1 space-y-0.5 text-xs text-neutral-700">
+              <ul className="mt-1 space-y-0.5 text-xs text-[var(--tinta-2)]">
                 {r.divergencias.map((d) => (
                   <li key={`${d.chargeId}-${d.motivo}`}>
                     cobrança <strong>{d.chargeId}</strong> — {d.motivo}
@@ -99,9 +99,9 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
 function Par({ t, v, sub }: { t: string; v: string; sub?: string }) {
   return (
     <div>
-      <dt className="text-xs text-neutral-500">{t}</dt>
-      <dd className="font-medium tabular-nums">{v}</dd>
-      {sub ? <dd className="text-xs text-neutral-500">{sub}</dd> : null}
+      <dt className="text-xs text-[var(--tinta-3)]">{t}</dt>
+      <dd className="font-medium num">{v}</dd>
+      {sub ? <dd className="text-xs text-[var(--tinta-3)]">{sub}</dd> : null}
     </div>
   );
 }

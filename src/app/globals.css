@@ -1,3 +1,182 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/**
+ * Sistema de cores do painel.
+ *
+ * ⚠ `color-scheme` é declarado de propósito. Sem ele, o Chrome aplica o
+ * "auto dark mode" em páginas que não declaram esquema: ele inverte fundos e
+ * preserva parte das cores, produzindo exatamente o resultado quebrado que o
+ * dono do projeto viu — caixas de aviso âmbar com fundo escuro e contraste
+ * arruinado. Declarando o esquema, o navegador para de adivinhar.
+ *
+ * O modo escuro aqui é ESCOLHIDO, não um espelho automático do claro: cada
+ * cor tem um passo próprio, medido contra a superfície escura.
+ */
+:root {
+  color-scheme: light;
+
+  /* Superfícies */
+  --plano: #f9f9f7;
+  --superficie: #fcfcfb;
+  --superficie-sutil: #f2f1ed;
+
+  /* Tinta */
+  --tinta: #0b0b0b;
+  --tinta-2: #52514e;
+  --tinta-3: #898781;
+
+  /* Traços */
+  --borda: rgba(11, 11, 11, 0.1);
+  --linha: #e1e0d9;
+
+  /* Estado — nunca carregam significado sozinhos: sempre com rótulo */
+  --bom: #0ca30c;
+  --bom-tinta: #006300;
+  --atencao: #fab219;
+  --atencao-tinta: #7a5200;
+  --serio: #ec835a;
+  --critico: #d03b3b;
+  --critico-tinta: #a32020;
+
+  /* Séries (as três primeiras validam em todos os pares) */
+  --serie-1: #2a78d6;
+  --serie-2: #eb6834;
+  --serie-3: #1baf7a;
+
+  /* Marca — passo 700 da rampa sequencial azul. A lateral escura é o que dá
+     silhueta própria ao sistema. */
+  --marca: #0d366b;
+
+  /* Washes de estado, para faixas e fundos */
+  --wash-atencao: #fdf6e3;
+  --wash-critico: #fbeceb;
+  --wash-bom: #e9f7e9;
+  --wash-info: #eaf2fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --plano: #0d0d0d;
+    --superficie: #1a1a19;
+    --superficie-sutil: #232322;
+
+    --tinta: #ffffff;
+    --tinta-2: #c3c2b7;
+    --tinta-3: #898781;
+
+    --borda: rgba(255, 255, 255, 0.1);
+    --linha: #2c2c2a;
+
+    --bom: #0ca30c;
+    --bom-tinta: #4cc44c;
+    --atencao: #fab219;
+    --atencao-tinta: #f0be55;
+    --serio: #ec835a;
+    --critico: #d03b3b;
+    --critico-tinta: #ef7a7a;
+
+    --serie-1: #3987e5;
+    --serie-2: #d95926;
+    --serie-3: #199e70;
+
+    --marca: #0a2547;
+
+    --wash-atencao: #2a2413;
+    --wash-critico: #2c1917;
+    --wash-bom: #14261a;
+    --wash-info: #15202e;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--plano);
+    color: var(--tinta);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Números grandes usam figuras proporcionais; `tabular-nums` fica reservado
+       para colunas que precisam alinhar verticalmente. */
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Colunas de números alinham; o resto não. */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .cartao {
+    background: var(--superficie);
+    border: 1px solid var(--borda);
+    border-radius: 10px;
+  }
+
+  .faixa {
+    border-radius: 8px;
+    border: 1px solid var(--borda);
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  .faixa-atencao {
+    background: var(--wash-atencao);
+    border-color: color-mix(in oklab, var(--atencao) 35%, transparent);
+    color: var(--atencao-tinta);
+  }
+  .faixa-critico {
+    background: var(--wash-critico);
+    border-color: color-mix(in oklab, var(--critico) 35%, transparent);
+    color: var(--critico-tinta);
+  }
+  .faixa-bom {
+    background: var(--wash-bom);
+    border-color: color-mix(in oklab, var(--bom) 35%, transparent);
+    color: var(--bom-tinta);
+  }
+  .faixa-info {
+    background: var(--wash-info);
+    border-color: color-mix(in oklab, var(--serie-1) 30%, transparent);
+    color: var(--tinta-2);
+  }
+
+  /* Cabeçalho de seção: pequeno, discreto, com respiro acima. */
+  .titulo-secao {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--tinta-3);
+  }
+
+  .tabela {
+    width: 100%;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+  }
+  .tabela thead th {
+    text-align: left;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--tinta-3);
+    padding: 0.625rem 0.875rem;
+    border-bottom: 1px solid var(--linha);
+    white-space: nowrap;
+  }
+  .tabela tbody td {
+    padding: 0.625rem 0.875rem;
+    border-bottom: 1px solid var(--linha);
+    color: var(--tinta);
+  }
+  .tabela tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .tabela tbody tr:hover {
+    background: var(--superficie-sutil);
+  }
+}

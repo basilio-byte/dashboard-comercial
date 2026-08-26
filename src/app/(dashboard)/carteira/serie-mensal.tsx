@@ -6,9 +6,7 @@ import { estadoDoEspelho } from "@/lib/intel/completude";
 import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
 import { corVariacao, pct } from "@/lib/ui";
 
-export const dynamic = "force-dynamic";
-
-export default async function Receita() {
+export async function SerieMensalDaCarteira() {
   const meses = [...ultimosMesesFechados(12), currentMonthKey()];
   const espelho = await estadoDoEspelho();
 
@@ -37,8 +35,8 @@ export default async function Receita() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Receita</h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <h2 className="text-[17px] font-semibold tracking-tight">Receita mês a mês</h2>
+        <p className="mt-1 text-sm text-[var(--tinta-3)]">
           Regime de <strong>emissão</strong>, valor com juros e multa. Canceladas e negociadas fora.
           Mesma régua do Dashboard Financeiro.
         </p>
@@ -46,9 +44,9 @@ export default async function Receita() {
 
       <AvisoCompletude estado={espelho} />
 
-      <div className="rounded border border-neutral-200 bg-white px-4 py-3">
-        <div className="text-sm text-neutral-500">Total dos 12 meses fechados</div>
-        <div className="mt-1 text-2xl font-semibold tabular-nums">
+      <div className="cartao px-4 py-3">
+        <div className="text-sm text-[var(--tinta-3)]">Total dos 12 meses fechados</div>
+        <div className="mt-1 text-2xl font-semibold num">
           {/* Mesmo gate do Panorama. Sem isto, com a carga de cobranças parada,
               o Panorama dizia "indisponível" e esta tela dizia um total com selo
               de fato — duas telas do mesmo dashboard se contradizendo. */}
@@ -59,9 +57,9 @@ export default async function Receita() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded border border-neutral-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500">
+      <div className="overflow-x-auto cartao">
+        <table className="tabela">
+          <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
             <tr>
               <th className="px-4 py-2 font-medium">Mês</th>
               <th className="px-4 py-2 font-medium">Volume</th>
@@ -70,17 +68,17 @@ export default async function Receita() {
               <th className="px-4 py-2 text-right font-medium">Variação</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-100">
+          <tbody className="divide-y divide-[var(--linha)]">
             {serie.map((p) => (
-              <tr key={p.mesKey} className={p.emCurso ? "bg-amber-50/50" : ""}>
+              <tr key={p.mesKey} className={p.emCurso ? "bg-[var(--wash-atencao)]" : ""}>
                 <td className="px-4 py-2 whitespace-nowrap">
                   {rotuloMes(p.mesKey)}
-                  {p.emCurso ? <span className="ml-2 text-xs text-amber-700">em curso</span> : null}
+                  {p.emCurso ? <span className="ml-2 text-xs text-[var(--atencao-tinta)]">em curso</span> : null}
                 </td>
                 <td className="px-4 py-2">
-                  <div className="h-2 w-full max-w-xs rounded bg-neutral-100">
+                  <div className="h-2 w-full max-w-xs rounded bg-[var(--superficie-sutil)]">
                     <div
-                      className={p.emCurso ? "h-2 rounded bg-amber-300" : "h-2 rounded bg-neutral-800"}
+                      className={p.emCurso ? "h-2 rounded bg-[var(--atencao)]" : "h-2 rounded bg-[var(--serie-1)]"}
                       style={{
                         width: maximo.isZero()
                           ? "0%"
@@ -89,9 +87,9 @@ export default async function Receita() {
                     />
                   </div>
                 </td>
-                <td className="px-4 py-2 text-right tabular-nums text-neutral-500">{p.cobrancas}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{formatBRL(p.receita)}</td>
-                <td className={`px-4 py-2 text-right tabular-nums ${corVariacao(p.variacao)}`}>
+                <td className="px-4 py-2 text-right num text-[var(--tinta-3)]">{p.cobrancas}</td>
+                <td className="px-4 py-2 text-right num">{formatBRL(p.receita)}</td>
+                <td className={`px-4 py-2 text-right num ${corVariacao(p.variacao)}`}>
                   {pct(p.variacao)}
                 </td>
               </tr>
@@ -100,7 +98,7 @@ export default async function Receita() {
         </table>
       </div>
 
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-[var(--tinta-3)]">
         O mês em curso aparece destacado e <strong>não</strong> entra no total nem alimenta alerta —
         comparar um mês pela metade com um mês inteiro marcaria a base toda em queda.
       </p>

@@ -15,7 +15,7 @@ export function AvisoCompletude({ estado }: { estado: EstadoEspelho }) {
   const receitaAfetada = !estado.receitaConfiavel;
 
   return (
-    <div className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <div className="rounded border border-[color-mix(in_oklab,var(--atencao)_35%,transparent)] bg-[var(--wash-atencao)] px-4 py-3 text-sm text-[var(--atencao-tinta)]">
       <p>
         <strong>Espelho incompleto.</strong> Ainda faltam dados de: {rotulos}.
       </p>
@@ -27,7 +27,7 @@ export function AvisoCompletude({ estado }: { estado: EstadoEspelho }) {
         </p>
       ) : null}
       <p className="mt-1 text-xs">
-        Continue a carga em Operação — ela retoma de onde parou, não recomeça.
+        Continue a carga em Motor — ela retoma de onde parou, não recomeça.
       </p>
     </div>
   );
@@ -46,7 +46,7 @@ export function ValorOuLacuna({
   if (confiavel) return <span className={className}>{valor}</span>;
   return (
     <span
-      className={`text-neutral-400 ${className ?? ""}`}
+      className={`text-[var(--tinta-3)] ${className ?? ""}`}
       title="A carga de cobranças não terminou — este número seria um zero falso"
     >
       não disponível

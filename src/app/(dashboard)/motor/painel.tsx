@@ -24,9 +24,9 @@ export function PainelOperacao() {
   };
 
   return (
-    <section className="rounded border border-neutral-200 bg-white px-4 py-3">
+    <section className="cartao px-4 py-3">
       <h2 className="text-sm font-medium">Ações</h2>
-      <p className="mt-1 text-xs text-neutral-500">
+      <p className="mt-1 text-xs text-[var(--tinta-3)]">
         Na ordem: cadastros primeiro (tudo depende deles), depois a carga, depois a consolidação.
         A carga é feita <strong>por janela mensal</strong>, da mais recente para a mais antiga, com
         teto por execução — rodar de novo continua de onde parou. O incremental reprocessa só as
@@ -47,7 +47,7 @@ export function PainelOperacao() {
         </Botao>
       </div>
       {saida ? (
-        <pre className="mt-3 overflow-x-auto rounded bg-neutral-50 p-3 text-xs text-neutral-700">{saida}</pre>
+        <pre className="mt-3 overflow-x-auto rounded bg-[var(--superficie-sutil)] p-3 text-xs text-[var(--tinta-2)]">{saida}</pre>
       ) : null}
     </section>
   );
@@ -67,7 +67,7 @@ function Botao({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 disabled:opacity-50"
+      className="rounded border border-[var(--linha)] px-3 py-1.5 text-sm hover:bg-[var(--superficie-sutil)] disabled:opacity-50"
     >
       {children}
     </button>

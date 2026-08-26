@@ -3,13 +3,19 @@ import { cn } from "@/lib/ui";
 /**
  * Selo de procedência. Critério de aceite da Fase 1: **nenhum número na tela
  * sem selo**. Um valor sem origem declarada é indistinguível de um chute, e
- * este sistema vai gerar oferta para cliente real.
+ * este sistema gera oferta para cliente real.
+ *
+ * Discreto de propósito: é metadado, não conteúdo. Compete com o número só
+ * quando a procedência é ruim.
  */
-const ROTULOS = {
-  API: { texto: "da API", classe: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
-  DERIVADO: { texto: "derivado", classe: "bg-sky-50 text-sky-800 ring-sky-200" },
-  MANUAL: { texto: "manual", classe: "bg-amber-50 text-amber-900 ring-amber-200" },
-  INDISPONIVEL: { texto: "indisponível", classe: "bg-neutral-100 text-neutral-600 ring-neutral-300" },
+const PAPEIS = {
+  API: { texto: "da API", classe: "text-[var(--tinta-3)] border-[var(--linha)]" },
+  DERIVADO: { texto: "derivado", classe: "text-[var(--tinta-3)] border-[var(--linha)]" },
+  MANUAL: { texto: "manual", classe: "text-[var(--atencao-tinta)] border-[color-mix(in_oklab,var(--atencao)_40%,transparent)]" },
+  INDISPONIVEL: {
+    texto: "indisponível",
+    classe: "text-[var(--atencao-tinta)] border-[color-mix(in_oklab,var(--atencao)_40%,transparent)]",
+  },
 } as const;
 
 export function Procedencia({
@@ -17,33 +23,33 @@ export function Procedencia({
   detalhe,
   className,
 }: {
-  tipo: keyof typeof ROTULOS;
+  tipo: keyof typeof PAPEIS;
   detalhe?: string;
   className?: string;
 }) {
-  const r = ROTULOS[tipo];
+  const p = PAPEIS[tipo];
   return (
     <span
       title={detalhe}
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset",
-        r.classe,
+        "inline-flex items-center rounded border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide",
+        p.classe,
         className,
       )}
     >
-      {r.texto}
+      {p.texto}
     </span>
   );
 }
 
 /**
  * Lacuna declarada. Existe para a UI NUNCA mostrar zero no lugar de "não sei" —
- * é a regra de ouro do projeto, e a diferença entre as duas coisas é o que
- * separa um alerta correto de um alerta inventado.
+ * é a regra de ouro do projeto, e a diferença entre as duas coisas separa um
+ * alerta correto de um alerta inventado.
  */
 export function Lacuna({ motivo }: { motivo: string }) {
   return (
-    <span className="text-neutral-400" title={motivo}>
+    <span className="text-[var(--tinta-3)]" title={motivo}>
       não disponível
     </span>
   );
