@@ -69,20 +69,30 @@ export default async function Operacao() {
             <tbody className="divide-y divide-neutral-100">
               {progresso.map((p) => {
                 const pct = p.total ? Math.round((p.concluidas / p.total) * 100) : 0;
+                void pct;
                 return (
                   <tr key={p.entidade}>
                     <td className="px-4 py-2">{p.entidade}</td>
                     <td className="px-4 py-2">
                       <div className="h-2 w-full max-w-xs rounded bg-neutral-100">
                         <div
-                          className={pct === 100 ? "h-2 rounded bg-emerald-600" : "h-2 rounded bg-sky-600"}
-                          style={{ width: `${pct}%` }}
+                          className={
+                            p.total !== null && p.concluidas >= p.total
+                              ? "h-2 rounded bg-emerald-600"
+                              : "h-2 rounded bg-sky-600"
+                          }
+                          style={{ width: `${p.total ? Math.round((p.concluidas / p.total) * 100) : 8}%` }}
                         />
                       </div>
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums">
-                      {p.total === 0 ? (
-                        <span className="text-neutral-400">não iniciada</span>
+                      {p.total === null ? (
+                        <span
+                          className="text-amber-700"
+                          title="O fundo do histórico ainda não foi alcançado — não se sabe quantas janelas existem"
+                        >
+                          {p.concluidas}/?
+                        </span>
                       ) : (
                         `${p.concluidas}/${p.total}`
                       )}
@@ -97,9 +107,11 @@ export default async function Operacao() {
           </table>
         </div>
         <p className="mt-2 text-xs text-neutral-500">
-          Completude é <strong>todas as janelas concluídas</strong>, não &quot;o cursor chegou ao
-          fim&quot;. A diferença importa: o cursor chega ao fim mesmo tendo pulado registros, e
-          nenhuma conferência era possível depois. Uma janela pode ser reprocessada.
+          Completude é <strong>todas as janelas concluídas até o fundo do histórico</strong>. A carga
+          anda do mês corrente para trás e só declara o fundo depois de seis janelas vazias
+          seguidas — porque a API <strong>não devolve os registros em ordem</strong>, então não dá
+          para perguntar &quot;qual é o mais antigo&quot;. Enquanto o fundo não é alcançado, o total
+          aparece como <strong>?</strong>: desconhecido nunca é completo.
         </p>
       </section>
 

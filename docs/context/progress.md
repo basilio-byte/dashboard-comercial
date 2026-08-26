@@ -4,6 +4,60 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-08-26 — Sincronização por janela, e a descoberta de que a API não é ordenada
+
+**Os dois achados estruturais da auditoria, atacados.** A paginação por offset
+global tinha um buraco silencioso, e a consolidação de horas usava um ciclo só
+para clientes com vários contratos.
+
+**Sync por janela mensal.** Cada entidade é varrida um mês por vez, com progresso
+em `SyncWindow`. Completude virou afirmação **verificável** ("todas as janelas
+concluídas até o fundo") em vez de "o cursor chegou ao fim" — que é verdadeiro
+mesmo tendo pulado registros. O incremental saiu de graça, e `POST /api/sync` sem
+parâmetro finalmente faz algo (antes devolvia 400).
+
+**Antes de construir, medi cada filtro de data.** A coleção Postman está errada
+em quatro de oito casos: `/charges` com `createdAtFrom` devolve zero
+silenciosamente; `/sales`, `/customers` e `/room/bookings` devolvem 400 com data
+pura e funcionam com ISO+offset. A própria API informa o formato na mensagem de
+erro: `Y-m-d\TH:i:sP`.
+
+**⚠ O achado maior veio da própria correção: a API NÃO devolve os registros em
+ordem.** Medido em `/room/bookings`: offset 0 traz um registro de 2024-12, offset
+5.000 traz um de **2024-03**, offset 21.000 volta atrás em relação ao 20.000.
+
+Eu havia descoberto o início do histórico lendo `offset: 0` e assumindo que era o
+mais antigo. Não é — e a carga **pulou nove meses em silêncio**: 15.647 reservas
+contra ~21.400 existentes.
+
+Foi o desenho por janelas que tornou o buraco **visível**, ao permitir comparar o
+carregado com o total sondado. O cursor global teria escondido isso para sempre.
+
+Corrigido: a carga anda do mês corrente **para trás** até seis janelas vazias
+consecutivas, sem assumir ordem nenhuma. Enquanto o fundo não é alcançado, o
+total é reportado como **desconhecido** — e desconhecido nunca é completo.
+
+**Consolidação por contrato.** Cada contrato com cota virou um bloco independente,
+com o seu ciclo. Quando há mais de um, a atribuição é declarada **ambígua** (a
+reserva não diz de qual balde a hora saiu) e o cliente fica fora da fila
+automática, contado à parte.
+
+**Correção verificada contra a produção.** Com a varredura para trás, o mesmo
+banco saiu de **15.647** para **21.345** reservas — e esse número **bate com a
+estimativa independente** obtida por busca binária de offset (~21.250–21.562).
+Dois métodos diferentes concordando é o que faltava para confiar no espelho.
+
+O fundo foi encontrado em 2023-08, após seis janelas vazias consecutivas; o dado
+real começa em 2024-02.
+
+A distribuição de status na base completa também confirma o achado da auditoria:
+`partiallyPaid` **existe** (9 registros, 31,5h) e o código antigo o descartava em
+silêncio.
+
+62 testes.
+
+---
+
 ## 2026-08-26 — Selo de completude, e o ciclo da cota respondido
 
 **Um bug real, achado rodando a primeira carga.** O backfill parou no teto de páginas com só os

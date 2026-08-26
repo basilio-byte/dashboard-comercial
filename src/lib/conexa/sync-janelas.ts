@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { conexaFetch, paginatePages, requisicoesFeitas, type ConexaPage } from "./client";
+import { paginatePages, requisicoesFeitas } from "./client";
 import { currentMonthKey } from "@/lib/dates";
 import {
   ENTIDADES,
@@ -75,45 +75,42 @@ async function gravarLote(entidade: Entidade, linhas: Array<{ conexaId: number }
 }
 
 // ---------------------------------------------------------------------------
-// Descoberta do início do histórico
+// Descoberta do fundo do histórico
 // ---------------------------------------------------------------------------
 
-/** Campo da resposta que carrega a data pela qual a janela corta. */
-const CAMPO_DATA: Record<Entidade, string> = {
-  customers: "createdAt",
-  sales: "createdAt",
-  bookings: "createdAt",
-  charges: "dueDate",
-  contracts: "startDate",
-};
-
 /**
- * A janela mais antiga com dado, descoberta uma vez e memorizada.
+ * ⚠ A API do Conexa **NÃO devolve os registros em ordem** — nem por id, nem por
+ * data. Medido em `/room/bookings`:
  *
- * `offset: 0` devolve o registro mais antigo (a API ordena por id crescente,
- * observado em produção). Sem isto, gerar janelas desde uma data chutada
- * desperdiçaria uma requisição por mês vazio.
+ *   offset     0 → bookingId  8626, criado em 2024-12-18
+ *   offset  5000 → bookingId  1384, criado em 2024-03-21   ← mais ANTIGO
+ *   offset 20000 → bookingId 24043, criado em 2026-05-29
+ *   offset 21000 → bookingId 22921, criado em 2026-04-22   ← volta atrás
+ *
+ * A versão anterior descobria o início do histórico lendo `offset: 0` e
+ * assumindo que era o registro mais antigo. Como a ordem não existe, ela pegou
+ * 2024-12 quando havia dado de 2024-03 — e a carga **pulou nove meses em
+ * silêncio**: 15.647 registros carregados contra ~21.400 existentes.
+ *
+ * Foi o próprio desenho por janelas que tornou o buraco visível (deu para
+ * comparar o carregado com o total sondado). O cursor de offset global teria
+ * escondido isso.
+ *
+ * Agora não há descoberta: a carga **anda para trás** a partir do mês corrente
+ * e para depois de N janelas consecutivas vazias. Não assume ordem nenhuma.
  */
-async function janelaInicial(entidade: Entidade): Promise<string> {
-  const chave = `janela-inicial:${entidade}`;
-  const guardado = await prisma.syncState.findUnique({ where: { key: chave } });
-  if (guardado?.cursor) return guardado.cursor;
+const JANELAS_VAZIAS_PARA_PARAR = 6;
+const MAX_JANELAS_HISTORICO = 240; // 20 anos — trava contra laço infinito
 
-  const def = ENTIDADES[entidade];
-  const page = await conexaFetch<ConexaPage<Record<string, unknown>>>(def.recurso, {
-    query: { limit: 1, offset: 0 },
-  });
-  const itens = Array.isArray(page) ? page : (page.data ?? []);
-  const bruto = itens[0]?.[CAMPO_DATA[entidade]];
-  // Sem dado ou sem a data: cai no mês corrente, o que gera uma janela só.
-  const janela = typeof bruto === "string" ? bruto.slice(0, 7) : currentMonthKey();
-
-  await prisma.syncState.upsert({
-    where: { key: chave },
-    create: { key: chave, cursor: janela },
-    update: { cursor: janela },
-  });
-  return janela;
+/** Gera janelas do mês corrente para trás. */
+function janelasParaTras(quantas: number): string[] {
+  const [ano, mes] = currentMonthKey().split("-").map(Number);
+  const out: string[] = [];
+  for (let i = 0; i < quantas; i++) {
+    const d = new Date(Date.UTC(ano!, mes! - 1 - i, 1));
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,28 +226,51 @@ export async function cargaHistorica(
   let interrompida = false;
 
   for (const entidade of alvos) {
-    const inicio = await janelaInicial(entidade);
-    const todas = gerarJanelas(inicio, currentMonthKey()).reverse(); // recente primeiro
-
     const feitas = await prisma.syncWindow.findMany({
-      where: { entidade, status: "CONCLUIDA" },
-      select: { janela: true },
+      where: { entidade },
+      select: { janela: true, status: true, registros: true },
     });
-    const concluidas = new Set(feitas.map((f) => f.janela));
+    const porJanela = new Map(feitas.map((f) => [f.janela, f]));
 
-    for (const janela of todas) {
-      if (concluidas.has(janela)) continue;
+    // Já sabemos onde é o fundo? Então não precisa procurar de novo.
+    const fundo = await prisma.syncState.findUnique({
+      where: { key: `fundo:${entidade}` },
+    });
+
+    let vaziasSeguidas = 0;
+    for (const janela of janelasParaTras(MAX_JANELAS_HISTORICO)) {
+      if (fundo?.cursor && janela < fundo.cursor) break; // além do fundo conhecido
+
+      const ja = porJanela.get(janela);
+      if (ja?.status === "CONCLUIDA") {
+        // Conta o vazio mesmo em janela já feita: é assim que o fundo é
+        // reconhecido numa segunda execução.
+        vaziasSeguidas = ja.registros === 0 ? vaziasSeguidas + 1 : 0;
+        if (vaziasSeguidas >= JANELAS_VAZIAS_PARA_PARAR) {
+          await marcarFundo(entidade, janela);
+          break;
+        }
+        continue;
+      }
+
       if (detalhe.length >= teto || opts.signal?.aborted) {
         interrompida = true;
         break;
       }
+
       const r = await sincronizarJanela(entidade, janela, {
         maxPaginas: opts.maxPaginasPorJanela,
         signal: opts.signal,
       });
       detalhe.push(r);
       registros += r.registros;
-      if (r.status === "FALHOU") break; // não insistir na mesma entidade
+      if (r.status === "FALHOU") break;
+
+      vaziasSeguidas = r.status === "CONCLUIDA" && r.registros === 0 ? vaziasSeguidas + 1 : 0;
+      if (vaziasSeguidas >= JANELAS_VAZIAS_PARA_PARAR) {
+        await marcarFundo(entidade, janela);
+        break;
+      }
     }
     if (interrompida) break;
   }
@@ -268,6 +288,14 @@ export async function cargaHistorica(
     interrompida,
     detalhe,
   };
+}
+
+async function marcarFundo(entidade: Entidade, janela: string): Promise<void> {
+  await prisma.syncState.upsert({
+    where: { key: `fundo:${entidade}` },
+    create: { key: `fundo:${entidade}`, cursor: janela },
+    update: { cursor: janela },
+  });
 }
 
 /**
@@ -313,21 +341,31 @@ export async function sincronizarIncremental(
   };
 }
 
-/** Quanto falta, por entidade — alimenta a tela de operação e o selo. */
+/**
+ * Progresso por entidade.
+ *
+ * Enquanto o fundo do histórico não foi encontrado, o total é DESCONHECIDO — e
+ * é reportado como tal, não como um número que dá a impressão de completude.
+ */
 export async function progressoDaCarga(): Promise<
-  Array<{ entidade: Entidade; total: number; concluidas: number; pendentes: number; registros: number }>
+  Array<{
+    entidade: Entidade;
+    fundoConhecido: boolean;
+    total: number | null;
+    concluidas: number;
+    registros: number;
+  }>
 > {
   const saida = [];
   for (const entidade of Object.keys(ENTIDADES) as Entidade[]) {
-    const inicio = await prisma.syncState.findUnique({ where: { key: `janela-inicial:${entidade}` } });
-    const total = inicio?.cursor ? gerarJanelas(inicio.cursor, currentMonthKey()).length : 0;
+    const fundo = await prisma.syncState.findUnique({ where: { key: `fundo:${entidade}` } });
     const janelas = await prisma.syncWindow.findMany({ where: { entidade } });
     const concluidas = janelas.filter((j) => j.status === "CONCLUIDA").length;
     saida.push({
       entidade,
-      total,
+      fundoConhecido: Boolean(fundo?.cursor),
+      total: fundo?.cursor ? gerarJanelas(fundo.cursor, currentMonthKey()).length : null,
       concluidas,
-      pendentes: Math.max(0, total - concluidas),
       registros: janelas.reduce((a, j) => a + j.registros, 0),
     });
   }

@@ -66,20 +66,22 @@ export async function estadoDoEspelho(): Promise<EstadoEspelho> {
   const janelas = await prisma.syncWindow.findMany({
     select: { entidade: true, janela: true, status: true, registros: true },
   });
-  const inicios = await prisma.syncState.findMany({
-    where: { key: { startsWith: "janela-inicial:" } },
+  const fundos = await prisma.syncState.findMany({
+    where: { key: { startsWith: "fundo:" } },
   });
-  const inicioPor = new Map(inicios.map((i) => [i.key.replace("janela-inicial:", ""), i.cursor]));
+  const fundoPor = new Map(fundos.map((i) => [i.key.replace("fundo:", ""), i.cursor]));
 
   const entidades: EstadoEntidade[] = [];
   for (const entidade of ENTIDADES) {
     const registros = await CONTADOR[entidade]();
     const minhas = janelas.filter((j) => j.entidade === entidade);
     const concluidas = minhas.filter((j) => j.status === "CONCLUIDA").length;
-    const inicio = inicioPor.get(entidade);
-    // Sem início descoberto, a carga nunca rodou: total desconhecido, e
-    // "desconhecido" nunca é "completo".
-    const totais = inicio ? gerarJanelas(inicio, currentMonthKey()).length : 0;
+    const fundo = fundoPor.get(entidade);
+    // Sem o FUNDO do histórico encontrado, não se sabe quantas janelas existem —
+    // e "desconhecido" nunca é "completo". A versão anterior derivava o total de
+    // uma janela inicial descoberta lendo `offset: 0`, premissa que a medição
+    // derrubou: a API não devolve os registros em ordem.
+    const totais = fundo ? gerarJanelas(fundo, currentMonthKey()).length : 0;
 
     entidades.push({
       entidade,
