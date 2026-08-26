@@ -102,28 +102,19 @@ rodando em produção.
 
 ### Easypanel
 
-1. Serviço **Postgres** próprio (não compartilhar com o financeiro — ver
-   [ADR-0001](docs/context/decisions.md)).
-2. Serviço **App** do tipo **Docker Image** → `ghcr.io/basilio-byte/dashboard-comercial:latest`.
-   Se o pacote estiver privado, cadastrar usuário GitHub + PAT com `read:packages`.
-3. **ENV** (todas as variáveis, incluindo segredos, vivem aqui — ver [`.env.example`](.env.example)):
-   `DATABASE_URL`, `SESSION_SECRET` (`openssl rand -base64 48`), `APP_URL`,
-   `APP_TIMEZONE=America/Fortaleza`, `CONEXA_API_TOKEN`, `CRON_SECRET`,
-   `ADMIN_EMAIL`/`ADMIN_PASSWORD` (só no primeiro boot — pode remover depois).
-4. Porta `3000`. Healthcheck: `GET /api/health`.
-5. **Réplica única** — `SYNC_SCHEDULER=off` obrigatório em qualquer réplica extra
-   ([ADR-0003](docs/context/decisions.md)).
-6. `stop_grace_period` folgado, para a aplicação drenar o que estiver em voo.
+**Guia completo, com todas as variáveis: [`docs/context/deploy-easypanel.md`](docs/context/deploy-easypanel.md).**
 
-**Nada é manual no primeiro deploy.** O `docker-entrypoint.sh` aplica as migrations
-(`prisma migrate deploy`) e cria o primeiro admin (idempotente, nunca sobrescreve senha).
+Resumo: serviço **Postgres próprio** + serviço **Docker Image** apontando para
+`ghcr.io/basilio-byte/dashboard-comercial:latest`, porta `3000`, healthcheck em
+`GET /api/health`, **uma réplica**.
 
-O healthcheck confirma, de fora, que o deploy subiu com o disparo fechado:
+Mínimo de variáveis para subir: `DATABASE_URL`, `SESSION_SECRET`, `APP_URL`,
+`CONEXA_API_TOKEN`, `CRON_SECRET`, e `ADMIN_EMAIL`/`ADMIN_PASSWORD` no primeiro boot.
+Todo o resto tem default seguro — e **todos os defaults de disparo fecham**.
 
-```json
-{"status":"ok","db":"ok","env":"ok","timezone":"America/Fortaleza",
- "conexa":"sem token","notificador":"off","modo":"dry-run"}
-```
+Migrations, primeiro admin e o **agendador embutido** sobem sozinhos no boot. A
+carga histórica também: o agendador a continua a cada 10 min até o fim, sem
+ninguém clicar em nada.
 
 ## Estado atual
 
