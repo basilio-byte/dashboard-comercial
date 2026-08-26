@@ -1,5 +1,7 @@
+import { CircleCheck, CircleDashed, Clock, Ban, type LucideIcon } from "lucide-react";
 import { estadoDoEspelho } from "@/lib/intel/completude";
-import { Secao } from "@/components/Cartao";
+import { Cabecalho, Faixa, Secao } from "@/components/Cartao";
+import { cn } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +95,7 @@ function gatilhos(horasConfiavel: boolean): Gatilho[] {
       condicao: "2 meses do início do contrato",
       oferta: "SeaBox como benefício",
       estado: "pendente",
-      nota: 'se o SeaBox é cortesia e não vira venda, o sistema nunca saberá que o cliente já recebeu',
+      nota: "se o SeaBox é cortesia e não vira venda, o sistema nunca saberá que o cliente já recebeu",
     },
     {
       n: 8,
@@ -122,75 +124,146 @@ function gatilhos(horasConfiavel: boolean): Gatilho[] {
   ];
 }
 
-const ESTILO: Record<Estado, { cor: string; marca: string; rotulo: string }> = {
-  ligado: { cor: "text-[var(--bom-tinta)]", marca: "●", rotulo: "ligado" },
-  aguardando: { cor: "text-[var(--atencao-tinta)]", marca: "◐", rotulo: "aguardando dado" },
-  bloqueado: { cor: "text-[var(--critico-tinta)]", marca: "✕", rotulo: "bloqueado" },
-  pendente: { cor: "text-[var(--tinta-3)]", marca: "○", rotulo: "não implementado" },
+/**
+ * ⚠ Cada estado tem ÍCONE, RÓTULO e cor — nesta ordem de importância. A cor
+ * sozinha não pode carregar "este gatilho está desligado": é exatamente a
+ * informação que, perdida, faz alguém achar que o motor está rodando.
+ */
+const ESTILO: Record<
+  Estado,
+  { classeSelo: string; classeAresta: string; Icone: LucideIcon; rotulo: string }
+> = {
+  ligado: {
+    classeSelo: "selo-bom",
+    classeAresta: "bg-[var(--bom)]",
+    Icone: CircleCheck,
+    rotulo: "ligado",
+  },
+  aguardando: {
+    classeSelo: "selo-atencao",
+    classeAresta: "bg-[var(--atencao)]",
+    Icone: Clock,
+    rotulo: "aguardando dado",
+  },
+  bloqueado: {
+    classeSelo: "selo-critico",
+    classeAresta: "bg-[var(--critico)]",
+    Icone: Ban,
+    rotulo: "bloqueado",
+  },
+  pendente: {
+    classeSelo: "",
+    classeAresta: "bg-[var(--linha)]",
+    Icone: CircleDashed,
+    rotulo: "não implementado",
+  },
 };
+
+const ORDEM_RESUMO: Estado[] = ["ligado", "aguardando", "bloqueado", "pendente"];
 
 export default async function Gatilhos() {
   const espelho = await estadoDoEspelho();
   const lista = gatilhos(espelho.horasConfiavel);
-  const ligados = lista.filter((g) => g.estado === "ligado").length;
+  const contagem = (e: Estado) => lista.filter((g) => g.estado === e).length;
+  const ligados = contagem("ligado");
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-[26px] font-semibold tracking-tight">Gatilhos</h1>
-        <p className="mt-1 text-[14px] text-[var(--tinta-2)]">
-          O que dispara uma oferta — e, principalmente, o que ainda <strong>não</strong> dispara.
-          Uma fila vazia só quer dizer alguma coisa quando se sabe o que está ligado.
-        </p>
-      </div>
+    <>
+      <Cabecalho
+        titulo="Gatilhos"
+        sub={
+          <>
+            O que dispara uma oferta — e, principalmente, o que ainda <strong>não</strong> dispara.
+            Uma fila vazia só quer dizer alguma coisa quando se sabe o que está ligado.
+          </>
+        }
+        acao={
+          <span className={cn("selo", ligados > 0 ? "selo-bom" : "selo-atencao")}>
+            {ligados} de {lista.length} ativos
+          </span>
+        }
+      />
 
-      <div className="faixa faixa-info">
-        <strong>
-          {ligados} de {lista.length} gatilhos ativos.
-        </strong>{" "}
-        Nenhum deles cria task no ClickUp ainda — a camada de disparo não existe. O que roda hoje
-        aparece no Radar, para o vendedor decidir o que fazer.
-      </div>
-
-      <Secao titulo="Os gatilhos" sub="Fonte: documento de especificação do cliente, mais um derivado da conversa com o responsável.">
-        <div className="space-y-2">
-          {lista.map((g) => {
-            const e = ESTILO[g.estado];
+      <div className="space-y-8">
+        {/* Placar por estado: responde "quanto do motor está de pé?" antes de
+            qualquer leitura item a item. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {ORDEM_RESUMO.map((e) => {
+            const { Icone, rotulo, classeSelo } = ESTILO[e];
+            const n = contagem(e);
             return (
-              <div key={g.nome} className="cartao px-4 py-3">
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  {/* Marca + rótulo: a cor nunca carrega o significado sozinha. */}
-                  <span className={e.cor} aria-hidden>
-                    {e.marca}
+              <div key={e} className="cartao px-3.5 py-3">
+                <div className="flex items-center gap-1.5 text-[12px] text-[var(--tinta-2)]">
+                  <span className={cn("selo h-5 w-5 justify-center p-0", classeSelo)}>
+                    <Icone size={12} />
                   </span>
-                  <span className="text-[15px] font-medium">{g.nome}</span>
-                  {g.n ? (
-                    <span className="text-[11px] text-[var(--tinta-3)]">regra {g.n}</span>
-                  ) : (
-                    <span className="text-[11px] text-[var(--tinta-3)]">
-                      pedido do responsável
-                    </span>
+                  {rotulo}
+                </div>
+                <div
+                  className={cn(
+                    "num mt-1.5 text-[22px] font-semibold leading-none",
+                    n === 0 && "text-[var(--tinta-3)]",
                   )}
-                  <span className={`ml-auto text-[12px] ${e.cor}`}>{e.rotulo}</span>
+                >
+                  {n}
                 </div>
-
-                <div className="mt-1.5 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-2">
-                  <div className="text-[var(--tinta-2)]">
-                    <span className="text-[var(--tinta-3)]">quando: </span>
-                    {g.condicao}
-                  </div>
-                  <div className="text-[var(--tinta-2)]">
-                    <span className="text-[var(--tinta-3)]">oferta: </span>
-                    {g.oferta}
-                  </div>
-                </div>
-
-                <p className="mt-1.5 text-[12px] text-[var(--tinta-3)]">{g.nota}</p>
               </div>
             );
           })}
         </div>
-      </Secao>
-    </div>
+
+        <Faixa tom="info">
+          Nenhum gatilho cria task no ClickUp ainda — <strong>a camada de disparo não existe</strong>.
+          O que roda hoje aparece no Radar, para o vendedor decidir o que fazer.
+        </Faixa>
+
+        <Secao
+          titulo="Os gatilhos"
+          sub="Fonte: documento de especificação do cliente, mais um derivado da conversa com o responsável."
+        >
+          <div className="space-y-2">
+            {lista.map((g) => {
+              const e = ESTILO[g.estado];
+              return (
+                <div
+                  key={g.nome}
+                  className="cartao cartao-alvo relative overflow-hidden px-4 py-3.5 pl-5"
+                >
+                  {/* Aresta de estado: legível de relance na lista inteira. */}
+                  <span
+                    aria-hidden
+                    className={cn("absolute inset-y-0 left-0 w-[3px]", e.classeAresta)}
+                  />
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className="text-[14.5px] font-semibold">{g.nome}</span>
+                    <span className="selo">
+                      {g.n ? `regra ${g.n}` : "pedido do responsável"}
+                    </span>
+                    <span className={cn("selo ml-auto", e.classeSelo)}>
+                      <e.Icone size={11.5} aria-hidden />
+                      {e.rotulo}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 grid gap-x-8 gap-y-1 text-[13px] sm:grid-cols-2">
+                    <div className="text-[var(--tinta-2)]">
+                      <span className="text-[var(--tinta-3)]">quando: </span>
+                      {g.condicao}
+                    </div>
+                    <div className="text-[var(--tinta-2)]">
+                      <span className="text-[var(--tinta-3)]">oferta: </span>
+                      {g.oferta}
+                    </div>
+                  </div>
+
+                  <p className="mt-2 text-[12px] leading-relaxed text-[var(--tinta-3)]">{g.nota}</p>
+                </div>
+              );
+            })}
+          </div>
+        </Secao>
+      </div>
+    </>
   );
 }

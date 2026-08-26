@@ -1,8 +1,21 @@
 "use client";
 import { useState, useTransition } from "react";
+import { CircleCheck, CircleAlert, TriangleAlert, Loader, type LucideIcon } from "lucide-react";
 import { acaoReconciliar } from "@/lib/operacao/actions";
 import type { ResultadoReconciliacao } from "@/lib/intel/reconciliar";
 import { rotuloMes } from "@/lib/dates";
+import { cn } from "@/lib/ui";
+
+/**
+ * ⚠ O veredicto tem ÍCONE, PALAVRA e cor. A conferência decide se um número
+ * pode alimentar gatilho: se a cor for o único portador, "DIVERGE" e "BATE"
+ * ficam iguais para quem não a distingue.
+ */
+const VEREDICTO: Record<string, { Icone: LucideIcon; classe: string; rotulo: string }> = {
+  BATE: { Icone: CircleCheck, classe: "faixa-bom", rotulo: "bate" },
+  DIVERGE: { Icone: CircleAlert, classe: "faixa-critico", rotulo: "DIVERGE" },
+};
+const NADA = { Icone: TriangleAlert, classe: "faixa-atencao", rotulo: "nada conferido" };
 
 export function PainelReconciliacao({ meses }: { meses: string[] }) {
   const [pendente, iniciar] = useTransition();
@@ -22,15 +35,17 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
     });
   };
 
+  const v = r ? (VEREDICTO[r.veredicto] ?? NADA) : null;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-sm">
+        <label className="text-[12.5px]">
           <span className="block text-[var(--tinta-2)]">Mês fechado</span>
           <select
             value={mes}
             onChange={(e) => setMes(e.target.value)}
-            className="mt-1 rounded border border-[var(--linha)] px-3 py-1.5 text-sm"
+            className="campo mt-1 w-auto pr-8"
           >
             {meses.map((m) => (
               <option key={m} value={m}>
@@ -39,69 +54,92 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          onClick={rodar}
-          disabled={pendente || !mes}
-          className="rounded border border-[var(--linha)] px-3 py-1.5 text-sm hover:bg-[var(--superficie-sutil)] disabled:opacity-50"
-        >
+        <button type="button" onClick={rodar} disabled={pendente || !mes} className="btn">
+          {pendente ? <Loader size={14} className="animate-spin" aria-hidden /> : null}
           {pendente ? "Conferindo… (pode levar minutos)" : "Conferir contra o Conexa"}
         </button>
       </div>
 
-      {erro ? <p className="rounded faixa faixa-critico">{erro}</p> : null}
+      {erro ? (
+        <div className="faixa faixa-critico" role="alert">
+          <CircleAlert size={16} className="faixa-icone" aria-hidden />
+          <div className="min-w-0 flex-1">{erro}</div>
+        </div>
+      ) : null}
 
-      {r ? (
-        <div
-          className={`rounded border px-4 py-3 ${
-            r.veredicto === "BATE"
-              ? "faixa-bom"
-              : r.veredicto === "DIVERGE"
-                ? "border-[color-mix(in_oklab,var(--critico)_35%,transparent)] bg-[var(--wash-critico)]"
-                : "border-[color-mix(in_oklab,var(--atencao)_35%,transparent)] bg-[var(--wash-atencao)]"
-          }`}
-        >
-          <p className="font-medium">
-            {r.veredicto === "BATE"
-              ? `✓ ${rotuloMes(r.mesKey)} bate`
-              : r.veredicto === "DIVERGE"
-                ? `✗ ${rotuloMes(r.mesKey)} DIVERGE`
-                : `⚠ ${rotuloMes(r.mesKey)} — nada conferido`}
-          </p>
-          {r.observacao ? <p className="mt-1 text-sm">{r.observacao}</p> : null}
-          <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
-            <Par t="Local" v={`R$ ${r.localTotal}`} sub={`${r.localContagem} cobranças`} />
-            <Par t="Conexa" v={`R$ ${r.remotoTotal}`} sub={`${r.remotoContagem} cobranças`} />
-            <Par t="Diferença" v={`R$ ${r.diferenca}`} />
-            <Par t="Requisições" v={String(r.requisicoes)} />
-          </dl>
-
-          {r.divergencias.length ? (
-            <div className="mt-3">
-              <p className="text-sm font-medium">Divergências (até 50)</p>
-              <ul className="mt-1 space-y-0.5 text-xs text-[var(--tinta-2)]">
-                {r.divergencias.map((d) => (
-                  <li key={`${d.chargeId}-${d.motivo}`}>
-                    cobrança <strong>{d.chargeId}</strong> — {d.motivo}
-                    {d.local ? ` · local R$ ${d.local}` : ""}
-                    {d.remoto ? ` · Conexa R$ ${d.remoto}` : ""}
-                  </li>
-                ))}
-              </ul>
+      {r && v ? (
+        <div className={cn("cartao overflow-hidden")}>
+          <div className={cn("cartao-topo !border-b-0", v.classe)}>
+            <div className="flex items-center gap-2 text-[14px] font-semibold">
+              <v.Icone size={16} className="faixa-icone" aria-hidden />
+              {rotuloMes(r.mesKey)} — {v.rotulo}
             </div>
-          ) : null}
+            <span className="num selo">{r.requisicoes} req.</span>
+          </div>
+
+          <div className="space-y-3 px-4 py-3.5">
+            {r.observacao ? (
+              <p className="text-[13px] leading-relaxed text-[var(--tinta-2)]">{r.observacao}</p>
+            ) : null}
+
+            <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+              <Par t="Local" v={`R$ ${r.localTotal}`} sub={`${r.localContagem} cobranças`} />
+              <Par t="Conexa" v={`R$ ${r.remotoTotal}`} sub={`${r.remotoContagem} cobranças`} />
+              <Par
+                t="Diferença"
+                v={`R$ ${r.diferenca}`}
+                destaque={r.veredicto === "DIVERGE" ? "critico" : undefined}
+              />
+            </dl>
+
+            {r.divergencias.length ? (
+              <div className="border-t border-[var(--linha)] pt-3">
+                <p className="text-[12.5px] font-semibold">
+                  Divergências{r.divergencias.length >= 50 ? " (até 50)" : ""}
+                </p>
+                <ul className="mt-1.5 space-y-1 text-[11.5px] leading-relaxed text-[var(--tinta-2)]">
+                  {r.divergencias.map((d) => (
+                    <li key={`${d.chargeId}-${d.motivo}`}>
+                      cobrança{" "}
+                      <strong className="num font-semibold text-[var(--tinta)]">{d.chargeId}</strong>{" "}
+                      — {d.motivo}
+                      {d.local ? ` · local R$ ${d.local}` : ""}
+                      {d.remoto ? ` · Conexa R$ ${d.remoto}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-function Par({ t, v, sub }: { t: string; v: string; sub?: string }) {
+function Par({
+  t,
+  v,
+  sub,
+  destaque,
+}: {
+  t: string;
+  v: string;
+  sub?: string;
+  destaque?: "critico";
+}) {
   return (
     <div>
-      <dt className="text-xs text-[var(--tinta-3)]">{t}</dt>
-      <dd className="font-medium num">{v}</dd>
-      {sub ? <dd className="text-xs text-[var(--tinta-3)]">{sub}</dd> : null}
+      <dt className="text-[11px] uppercase tracking-[0.04em] text-[var(--tinta-3)]">{t}</dt>
+      <dd
+        className={cn(
+          "num mt-0.5 text-[16px] font-semibold tracking-[-0.01em]",
+          destaque === "critico" && "text-[var(--critico-tinta)]",
+        )}
+      >
+        {v}
+      </dd>
+      {sub ? <dd className="text-[11.5px] text-[var(--tinta-3)]">{sub}</dd> : null}
     </div>
   );
 }

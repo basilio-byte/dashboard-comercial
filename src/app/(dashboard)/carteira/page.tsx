@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Search, UserX } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
 import { rotuloMes, ultimoMesFechado } from "@/lib/dates";
@@ -7,6 +8,7 @@ import { SerieMensalDaCarteira } from "./serie-mensal";
 import { corVariacao, pct } from "@/lib/ui";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
+import { Cabecalho, Nota, Painel, Rolante, Vazio } from "@/components/Cartao";
 
 export const dynamic = "force-dynamic";
 
@@ -21,9 +23,7 @@ export default async function Carteira({
   const espelho = await estadoDoEspelho();
 
   const perfis = await prisma.customerProfile.findMany({
-    where: busca
-      ? { customer: { name: { contains: busca, mode: "insensitive" } } }
-      : undefined,
+    where: busca ? { customer: { name: { contains: busca, mode: "insensitive" } } } : undefined,
     orderBy: { receitaAnoCorrente: "desc" },
     take: 200,
     select: {
@@ -43,92 +43,137 @@ export default async function Carteira({
   const varPorCliente = new Map(variacoes.map((v) => [v.customerConexaId, v.variacaoPct]));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-[26px] font-semibold tracking-tight">Carteira</h1>
-        <span className="text-sm text-[var(--tinta-3)]">{perfis.length} exibidos</span>
-      </div>
+    <>
+      <Cabecalho
+        titulo="Carteira"
+        sub="Seus clientes, e o que já se sabe sobre cada um. A receita vive aqui dentro, como atributo — não como tela própria."
+        acao={
+          <form className="flex gap-2">
+            <div className="relative">
+              <Search
+                size={14}
+                aria-hidden
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--tinta-3)]"
+              />
+              <input
+                name="q"
+                defaultValue={busca}
+                placeholder="Buscar por nome"
+                className="campo w-full pl-8 sm:w-64"
+              />
+            </div>
+            <button className="btn">Buscar</button>
+          </form>
+        }
+      />
 
-      <AvisoCompletude estado={espelho} />
+      <div className="space-y-6">
+        <AvisoCompletude estado={espelho} />
 
-      <form className="flex gap-2">
-        <input
-          name="q"
-          defaultValue={busca}
-          placeholder="Buscar por nome"
-          className="w-full max-w-sm rounded border border-[var(--linha)] px-3 py-2 text-sm"
-        />
-        <button className="rounded border border-[var(--linha)] px-3 py-2 text-sm">Buscar</button>
-      </form>
-
-      {perfis.length === 0 ? (
-        <p className="text-sm text-[var(--tinta-3)]">
-          {busca ? "Nenhum cliente com esse nome." : "Nenhum cliente no espelho ainda — rode a primeira carga em Motor."}
-        </p>
-      ) : (
-        <div className="overflow-x-auto cartao">
-          <table className="tabela">
-            <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
-              <tr>
-                <th className="px-4 py-2 font-medium">Cliente</th>
-                <th className="px-4 py-2 font-medium">Segmento</th>
-                <th className="px-4 py-2 text-right font-medium">Horas/mês</th>
-                <th className="px-4 py-2 text-right font-medium">Receita no ano</th>
-                <th className="px-4 py-2 text-right font-medium">{rotuloMes(mesFechado)}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--linha)]">
-              {perfis.map((p) => {
-                const v = varPorCliente.get(p.customerConexaId);
-                const inelegivel = !p.customer?.isActive || p.customer?.isBlocked;
-                return (
-                  <tr key={p.customerConexaId} className={inelegivel ? "bg-[var(--superficie-sutil)] text-[var(--tinta-3)]" : ""}>
-                    <td className="px-4 py-2">
-                      <Link href={`/carteira/${p.customerConexaId}`} className="hover:underline">
-                        {p.customer?.name ?? `Cliente ${p.customerConexaId}`}
-                      </Link>
-                      {inelegivel ? (
-                        <span className="ml-2 rounded bg-[var(--superficie-sutil)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--tinta-2)]">
-                          {p.customer?.isBlocked ? "bloqueado" : "inativo"}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-2 text-[var(--tinta-2)]">
-                      {p.segmentos.length ? p.segmentos.join(", ") : "—"}
-                    </td>
-                    <td className="px-4 py-2 text-right num">
-                      {p.horasInclusasMes === null
-                        ? p.temContratoAtivo
-                          ? <span title="Plano sem horas inclusas — é o caso do Endereço Fiscal Litoral">sem cota</span>
-                          : "—"
-                        : `${Number(p.horasInclusasMes)}h`}
-                    </td>
-                    <td className="px-4 py-2 text-right num">
-                      <ValorOuLacuna
-                        valor={formatBRL(p.receitaAnoCorrente.toString())}
-                        confiavel={espelho.receitaConfiavel}
-                      />
-                    </td>
-                    <td className={`px-4 py-2 text-right num ${corVariacao(v === null || v === undefined ? null : Number(v))}`}>
-                      {pct(v === null || v === undefined ? null : Number(v))}
-                    </td>
+        {perfis.length === 0 ? (
+          <Vazio Icone={UserX}>
+            {busca ? (
+              <>
+                Nenhum cliente com <strong>{busca}</strong> no nome.
+              </>
+            ) : (
+              "Nenhum cliente no espelho ainda — rode a primeira carga em Motor."
+            )}
+          </Vazio>
+        ) : (
+          <Painel
+            titulo={
+              <>
+                {perfis.length} {perfis.length === 1 ? "cliente" : "clientes"}
+                {busca ? <> para &quot;{busca}&quot;</> : null}
+                {perfis.length === 200 ? (
+                  <span className="text-[var(--tinta-3)]"> · limite da página</span>
+                ) : null}
+              </>
+            }
+          >
+            <Rolante>
+              <table className="tabela">
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Segmento</th>
+                    <th className="text-right">Horas/mês</th>
+                    <th className="text-right">Receita no ano</th>
+                    <th className="text-right">{rotuloMes(mesFechado)}</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                </thead>
+                <tbody>
+                  {perfis.map((p) => {
+                    const v = varPorCliente.get(p.customerConexaId);
+                    const inelegivel = !p.customer?.isActive || p.customer?.isBlocked;
+                    return (
+                      <tr key={p.customerConexaId} className={inelegivel ? "opacity-55" : undefined}>
+                        <td>
+                          <Link
+                            href={`/carteira/${p.customerConexaId}`}
+                            className="font-medium hover:text-[var(--acento-tinta)] hover:underline"
+                          >
+                            {p.customer?.name ?? `Cliente ${p.customerConexaId}`}
+                          </Link>
+                          {inelegivel ? (
+                            <span className="selo ml-2">
+                              {p.customer?.isBlocked ? "bloqueado" : "inativo"}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="text-[var(--tinta-2)]">
+                          {p.segmentos.length ? p.segmentos.join(", ") : "—"}
+                        </td>
+                        <td className="num text-right">
+                          {p.horasInclusasMes === null ? (
+                            p.temContratoAtivo ? (
+                              <span
+                                className="text-[var(--tinta-3)]"
+                                title="Plano sem horas inclusas — é o caso do Endereço Fiscal Litoral"
+                              >
+                                sem cota
+                              </span>
+                            ) : (
+                              "—"
+                            )
+                          ) : (
+                            `${Number(p.horasInclusasMes)}h`
+                          )}
+                        </td>
+                        <td className="num text-right font-medium">
+                          <ValorOuLacuna
+                            valor={formatBRL(p.receitaAnoCorrente.toString())}
+                            confiavel={espelho.receitaConfiavel}
+                          />
+                        </td>
+                        <td
+                          className={`num text-right ${corVariacao(
+                            v === null || v === undefined ? null : Number(v),
+                          )}`}
+                        >
+                          {pct(v === null || v === undefined ? null : Number(v))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Rolante>
+          </Painel>
+        )}
 
-      <div className="border-t border-[var(--linha)] pt-8">
+        <Nota>
+          <Procedencia tipo="DERIVADO" /> receita no regime de emissão ·{" "}
+          <Procedencia tipo="API" /> horas inclusas vêm de{" "}
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">plan.hourQuotas</code>
+          . &quot;Sem cota&quot; significa plano sem horas inclusas, e não zero hora.
+        </Nota>
+
+        <hr className="divisor !mt-10" />
+
         <SerieMensalDaCarteira />
       </div>
-
-      <p className="text-xs text-[var(--tinta-3)]">
-        <Procedencia tipo="DERIVADO" /> receita no regime de emissão ·{" "}
-        <Procedencia tipo="API" /> horas inclusas vêm de <code>plan.hourQuotas</code>. &quot;Sem cota&quot;
-        significa plano sem horas inclusas, e não zero hora.
-      </p>
-    </div>
+    </>
   );
 }

@@ -3,8 +3,9 @@ import { formatBRL, money, roundMoney, sum, variacaoPercentual } from "@/lib/mon
 import { currentMonthKey, rotuloMes, ultimosMesesFechados } from "@/lib/dates";
 import { Procedencia } from "@/components/Procedencia";
 import { estadoDoEspelho } from "@/lib/intel/completude";
-import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
+import { ValorOuLacuna } from "@/components/AvisoCompletude";
 import { corVariacao, pct } from "@/lib/ui";
+import { Nota, Painel, Rolante } from "@/components/Cartao";
 
 export async function SerieMensalDaCarteira() {
   const meses = [...ultimosMesesFechados(12), currentMonthKey()];
@@ -30,78 +31,83 @@ export async function SerieMensalDaCarteira() {
   });
 
   const maximo = serie.reduce((m, p) => (p.receita.greaterThan(m) ? p.receita : m), money(0));
-  const totalFechado = roundMoney(sum(serie.filter((p) => !p.emCurso).map((p) => p.receita.toString())));
+  const totalFechado = roundMoney(
+    sum(serie.filter((p) => !p.emCurso).map((p) => p.receita.toString())),
+  );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-[17px] font-semibold tracking-tight">Receita mês a mês</h2>
-        <p className="mt-1 text-sm text-[var(--tinta-3)]">
-          Regime de <strong>emissão</strong>, valor com juros e multa. Canceladas e negociadas fora.
-          Mesma régua do Dashboard Financeiro.
-        </p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+        <div>
+          <h2 className="text-[17px] font-semibold tracking-tight">Receita mês a mês</h2>
+          <p className="mt-1 max-w-2xl text-[13px] text-[var(--tinta-2)]">
+            Regime de <strong className="font-semibold text-[var(--tinta)]">emissão</strong>, valor
+            com juros e multa. Canceladas e negociadas fora. Mesma régua do Dashboard Financeiro.
+          </p>
+        </div>
+        {/* O total sai do cartão solto e vira o número do cabeçalho: um stat
+            tile de largura inteira só para repetir uma soma era desperdício de
+            uma faixa da tela. */}
+        <div className="text-right">
+          <div className="text-[11.5px] text-[var(--tinta-3)]">12 meses fechados</div>
+          <div className="num mt-0.5 text-[22px] font-semibold leading-none tracking-[-0.02em]">
+            <ValorOuLacuna valor={formatBRL(totalFechado)} confiavel={espelho.receitaConfiavel} />
+          </div>
+          <div className="mt-1.5">
+            <Procedencia tipo={espelho.receitaConfiavel ? "DERIVADO" : "INDISPONIVEL"} />
+          </div>
+        </div>
       </div>
 
-      <AvisoCompletude estado={espelho} />
+      {/* ⚠ Sem AvisoCompletude aqui: a Carteira já o mostra no topo, e as duas
+          faixas idênticas apareciam na mesma rolagem. Repetir um aviso o
+          transforma em ruído — a segunda cópia ensina a ignorar a primeira. */}
 
-      <div className="cartao px-4 py-3">
-        <div className="text-sm text-[var(--tinta-3)]">Total dos 12 meses fechados</div>
-        <div className="mt-1 text-2xl font-semibold num">
-          {/* Mesmo gate do Panorama. Sem isto, com a carga de cobranças parada,
-              o Panorama dizia "indisponível" e esta tela dizia um total com selo
-              de fato — duas telas do mesmo dashboard se contradizendo. */}
-          <ValorOuLacuna valor={formatBRL(totalFechado)} confiavel={espelho.receitaConfiavel} />
-        </div>
-        <div className="mt-1">
-          <Procedencia tipo={espelho.receitaConfiavel ? "DERIVADO" : "INDISPONIVEL"} />
-        </div>
-      </div>
-
-      <div className="overflow-x-auto cartao">
-        <table className="tabela">
-          <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
-            <tr>
-              <th className="px-4 py-2 font-medium">Mês</th>
-              <th className="px-4 py-2 font-medium">Volume</th>
-              <th className="px-4 py-2 text-right font-medium">Cobranças</th>
-              <th className="px-4 py-2 text-right font-medium">Receita</th>
-              <th className="px-4 py-2 text-right font-medium">Variação</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--linha)]">
-            {serie.map((p) => (
-              <tr key={p.mesKey} className={p.emCurso ? "bg-[var(--wash-atencao)]" : ""}>
-                <td className="px-4 py-2 whitespace-nowrap">
-                  {rotuloMes(p.mesKey)}
-                  {p.emCurso ? <span className="ml-2 text-xs text-[var(--atencao-tinta)]">em curso</span> : null}
-                </td>
-                <td className="px-4 py-2">
-                  <div className="h-2 w-full max-w-xs rounded bg-[var(--superficie-sutil)]">
-                    <div
-                      className={p.emCurso ? "h-2 rounded bg-[var(--atencao)]" : "h-2 rounded bg-[var(--serie-1)]"}
-                      style={{
-                        width: maximo.isZero()
-                          ? "0%"
-                          : `${Number(p.receita.div(maximo).times(100).toFixed(1))}%`,
-                      }}
-                    />
-                  </div>
-                </td>
-                <td className="px-4 py-2 text-right num text-[var(--tinta-3)]">{p.cobrancas}</td>
-                <td className="px-4 py-2 text-right num">{formatBRL(p.receita)}</td>
-                <td className={`px-4 py-2 text-right num ${corVariacao(p.variacao)}`}>
-                  {pct(p.variacao)}
-                </td>
+      <Painel>
+        <Rolante>
+          <table className="tabela">
+            <thead>
+              <tr>
+                <th>Mês</th>
+                <th className="w-[38%]">Volume</th>
+                <th className="text-right">Cobranças</th>
+                <th className="text-right">Receita</th>
+                <th className="text-right">Variação</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {serie.map((p) => (
+                <tr key={p.mesKey} className={p.emCurso ? "linha-curso" : undefined}>
+                  <td className="whitespace-nowrap">
+                    {rotuloMes(p.mesKey)}
+                    {p.emCurso ? <span className="selo selo-atencao ml-2">em curso</span> : null}
+                  </td>
+                  <td>
+                    <span className="barra block max-w-[260px]">
+                      <span
+                        className={p.emCurso ? "!bg-[var(--atencao)]" : undefined}
+                        style={{
+                          width: maximo.isZero()
+                            ? "0%"
+                            : `${Number(p.receita.div(maximo).times(100).toFixed(1))}%`,
+                        }}
+                      />
+                    </span>
+                  </td>
+                  <td className="num text-right text-[var(--tinta-3)]">{p.cobrancas}</td>
+                  <td className="num text-right font-medium">{formatBRL(p.receita)}</td>
+                  <td className={`num text-right ${corVariacao(p.variacao)}`}>{pct(p.variacao)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Rolante>
+      </Painel>
 
-      <p className="text-xs text-[var(--tinta-3)]">
+      <Nota>
         O mês em curso aparece destacado e <strong>não</strong> entra no total nem alimenta alerta —
         comparar um mês pela metade com um mês inteiro marcaria a base toda em queda.
-      </p>
+      </Nota>
     </div>
   );
 }

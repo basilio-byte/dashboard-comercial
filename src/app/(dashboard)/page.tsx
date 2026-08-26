@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { ArrowUpRight, Users, Wallet, Trophy, TrendingDown, Inbox } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatBRL, money } from "@/lib/money";
 import { nowInAppTz, rotuloMes, ultimoMesFechado } from "@/lib/dates";
 import { participacao, topClientes } from "@/lib/metrics/receita";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { clientesComExcedente } from "@/lib/intel/horas";
-import { Cartao, Secao, Vazio } from "@/components/Cartao";
+import { Cabecalho, Cartao, Faixa, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 import { Procedencia } from "@/components/Procedencia";
 import { corVariacao, pct } from "@/lib/ui";
 
@@ -27,13 +28,8 @@ export default async function Radar() {
   const anoCorrente = agora.getFullYear();
   const mesFechado = ultimoMesFechado(agora);
 
-  const [espelho, ultimoSync, agregado, clientesAtivos] = await Promise.all([
+  const [espelho, agregado, clientesAtivos] = await Promise.all([
     estadoDoEspelho(),
-    prisma.syncRun.findFirst({
-      where: { status: "SUCCESS" },
-      orderBy: { finishedAt: "desc" },
-      select: { finishedAt: true },
-    }),
     prisma.customerProfile.aggregate({
       where: { receitaAnoCorrente: { gt: 0 } },
       _sum: { receitaAnoCorrente: true },
@@ -56,140 +52,148 @@ export default async function Radar() {
   const totalAno = money(agregado._sum.receitaAnoCorrente?.toString() ?? 0);
   const horasFmt = (v: { toFixed: (n: number) => string }) =>
     `${Number(v.toFixed(1))}h`.replace(".", ",");
+  const naFila = fila?.itens.length ?? 0;
 
   return (
-    <div className="space-y-10">
-      <Cabecalho mesFechado={mesFechado} sincronizadoEm={ultimoSync?.finishedAt ?? null} />
+    <>
+      <Cabecalho
+        titulo="Radar"
+        sub="Quem procurar hoje, e por quê."
+        acao={
+          naFila > 0 ? (
+            <span className="selo selo-critico">
+              {naFila} {naFila === 1 ? "cliente na fila" : "clientes na fila"}
+            </span>
+          ) : null
+        }
+      />
 
-      <Secao
-        titulo="Oportunidades"
-        sub="Clientes com sinal de venda adicional, do mais forte para o mais fraco."
-      >
-        {filaBloqueada ? (
-          <div className="faixa faixa-atencao">
-            <strong>A fila ainda não pode ser calculada.</strong> {filaBloqueada}
+      <div className="space-y-9">
+        <Secao
+          titulo="Oportunidades"
+          sub="Clientes com sinal de venda adicional, do mais forte para o mais fraco."
+        >
+          {filaBloqueada ? (
+            <Faixa tom="atencao">
+              <strong>A fila ainda não pode ser calculada.</strong> {filaBloqueada}
+            </Faixa>
+          ) : !fila || fila.itens.length === 0 ? (
+            <Vazio Icone={Inbox}>
+              Nenhum cliente com sinal no momento.
+              {fila?.ambiguos ? (
+                <>
+                  {" "}
+                  <span className="text-[var(--atencao-tinta)]">
+                    {fila.ambiguos} cliente(s) ficaram de fora por atribuição ambígua
+                  </span>{" "}
+                  — têm mais de um contrato com cota, e a reserva não diz de qual balde a hora saiu.
+                </>
+              ) : null}
+            </Vazio>
+          ) : (
+            <Painel
+              rodape={
+                fila.truncado ? (
+                  <span className="text-[var(--atencao-tinta)]">
+                    A análise parou no limite — há mais clientes não avaliados.
+                  </span>
+                ) : naFila > 12 ? (
+                  <>Mostrando os 12 sinais mais fortes de {naFila}.</>
+                ) : null
+              }
+            >
+              <Rolante>
+                <table className="tabela">
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Motivo</th>
+                      <th className="text-right">Horas pagas por fora</th>
+                      <th className="text-right">Ciclos</th>
+                      <th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fila.itens.slice(0, 12).map((i) => (
+                      <tr key={i.customerConexaId} className="linha-sinal group">
+                        <td>
+                          <Link
+                            href={`/carteira/${i.customerConexaId}`}
+                            className="font-medium hover:text-[var(--acento-tinta)] hover:underline"
+                          >
+                            {i.nome ?? `Cliente ${i.customerConexaId}`}
+                          </Link>
+                        </td>
+                        <td className="text-[var(--tinta-2)]">
+                          Estoura a cota de horas com recorrência — candidato a upgrade
+                        </td>
+                        <td className="num text-right font-semibold text-[var(--critico-tinta)]">
+                          {horasFmt(i.horas.sinal!.horasExcedentes)}
+                        </td>
+                        <td className="num text-right text-[var(--tinta-2)]">
+                          {i.horas.sinal!.ciclosComEstouro}/{i.horas.sinal!.ciclosConclusivos}
+                        </td>
+                        <td className="pr-3 text-right">
+                          <Link
+                            href={`/carteira/${i.customerConexaId}`}
+                            aria-label={`Abrir ${i.nome ?? i.customerConexaId}`}
+                            className="inline-flex text-[var(--tinta-3)] opacity-0 transition-opacity hover:text-[var(--acento-tinta)] group-hover:opacity-100"
+                          >
+                            <ArrowUpRight size={15} />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Rolante>
+            </Painel>
+          )}
+        </Secao>
+
+        {/* O detalhamento dos gatilhos vive em tela própria — repetir aqui
+            competiria com a fila, que é o produto desta tela. */}
+        <Faixa tom="info">
+          Só <strong>um gatilho</strong> está ativo hoje. Veja em{" "}
+          <Link
+            href="/gatilhos"
+            className="font-medium text-[var(--acento-tinta)] underline underline-offset-2"
+          >
+            Gatilhos
+          </Link>{" "}
+          o que falta para os outros — fila vazia só significa algo quando se sabe o que está ligado.
+        </Faixa>
+
+        <Secao
+          titulo="Contexto"
+          sub="Números da carteira para embasar a conversa — não são o produto desta tela."
+        >
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Cartao
+              rotulo="Clientes ativos"
+              Icone={Users}
+              valor={clientesAtivos.toLocaleString("pt-BR")}
+              contexto="elegíveis para oferta"
+              procedencia="API"
+              confiavel={
+                espelho.entidades.find((e) => e.entidade === "customers")?.completa ?? false
+              }
+              detalheProcedencia="customer.isActive e isBlocked"
+            />
+            <Cartao
+              rotulo={`Receita ${anoCorrente}`}
+              Icone={Wallet}
+              valor={formatBRL(totalAno)}
+              contexto={`${agregado._count} clientes faturados`}
+              confiavel={espelho.receitaConfiavel}
+              detalheProcedencia="Soma de cobranças por data de emissão"
+            />
+            <TopClientes confiavel={espelho.receitaConfiavel} total={totalAno} />
           </div>
-        ) : !fila || fila.itens.length === 0 ? (
-          <Vazio>
-            Nenhum cliente com sinal no momento.
-            {fila?.ambiguos ? (
-              <>
-                {" "}
-                <span className="text-[var(--atencao-tinta)]">
-                  {fila.ambiguos} cliente(s) ficaram de fora por atribuição ambígua
-                </span>{" "}
-                — têm mais de um contrato com cota, e a reserva não diz de qual balde a hora saiu.
-              </>
-            ) : null}
-          </Vazio>
-        ) : (
-          <div className="cartao overflow-hidden">
-            <table className="tabela">
-              <thead>
-                <tr>
-                  <th>Cliente</th>
-                  <th>Motivo</th>
-                  <th className="text-right">Horas pagas por fora</th>
-                  <th className="text-right">Ciclos</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fila.itens.slice(0, 12).map((i) => (
-                  <tr key={i.customerConexaId}>
-                    <td>
-                      <Link
-                        href={`/carteira/${i.customerConexaId}`}
-                        className="font-medium hover:underline"
-                      >
-                        {i.nome ?? `Cliente ${i.customerConexaId}`}
-                      </Link>
-                    </td>
-                    <td className="text-[var(--tinta-2)]">
-                      Estoura a cota de horas com recorrência — candidato a upgrade
-                    </td>
-                    <td className="num text-right font-medium text-[var(--critico-tinta)]">
-                      {horasFmt(i.horas.sinal!.horasExcedentes)}
-                    </td>
-                    <td className="num text-right text-[var(--tinta-2)]">
-                      {i.horas.sinal!.ciclosComEstouro}/{i.horas.sinal!.ciclosConclusivos}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {fila.truncado ? (
-              <p className="border-t border-[var(--linha)] px-4 py-2 text-xs text-[var(--atencao-tinta)]">
-                A análise parou no limite — há mais clientes não avaliados.
-              </p>
-            ) : null}
-          </div>
-        )}
-      </Secao>
-
-      {/* O detalhamento dos gatilhos vive em tela própria — repetir aqui
-          competiria com a fila, que é o produto desta tela. */}
-      <div className="faixa faixa-info">
-        Só <strong>um gatilho</strong> está ativo hoje. Veja em{" "}
-        <Link href="/gatilhos" className="underline">
-          Gatilhos
-        </Link>{" "}
-        o que falta para os outros — fila vazia só significa algo quando se sabe o que está ligado.
+          <QuedaDeReceita mesFechado={mesFechado} confiavel={espelho.receitaConfiavel} />
+        </Secao>
       </div>
-
-      <Secao titulo="Contexto" sub="Números da carteira para embasar a conversa — não são o produto desta tela.">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Cartao
-            rotulo="Clientes ativos"
-            valor={clientesAtivos.toLocaleString("pt-BR")}
-            contexto="elegíveis para oferta"
-            procedencia="API"
-            confiavel={espelho.entidades.find((e) => e.entidade === "customers")?.completa ?? false}
-            detalheProcedencia="customer.isActive e isBlocked"
-          />
-          <Cartao
-            rotulo={`Receita ${anoCorrente}`}
-            valor={formatBRL(totalAno)}
-            contexto={`${agregado._count} clientes faturados`}
-            confiavel={espelho.receitaConfiavel}
-            detalheProcedencia="Soma de cobranças por data de emissão"
-          />
-          <TopClientes confiavel={espelho.receitaConfiavel} total={totalAno} />
-        </div>
-        <QuedaDeReceita mesFechado={mesFechado} confiavel={espelho.receitaConfiavel} />
-      </Secao>
-    </div>
-  );
-}
-
-function Cabecalho({
-  mesFechado,
-  sincronizadoEm,
-}: {
-  mesFechado: string;
-  sincronizadoEm: Date | null;
-}) {
-  const horas = sincronizadoEm ? (Date.now() - sincronizadoEm.getTime()) / 3_600_000 : null;
-  return (
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-[26px] font-semibold tracking-tight">Radar</h1>
-        <p className="mt-1 text-[14px] text-[var(--tinta-2)]">
-          Quem procurar hoje, e por quê.
-        </p>
-      </div>
-      <div className="text-[13px]">
-        {sincronizadoEm === null ? (
-          <span className="text-[var(--atencao-tinta)]">nunca sincronizado</span>
-        ) : horas !== null && horas > 2 ? (
-          <span className="text-[var(--atencao-tinta)]">sincronizado há {horas.toFixed(1)}h</span>
-        ) : (
-          <span className="text-[var(--tinta-3)]">
-            sincronizado{" "}
-            {new Intl.DateTimeFormat("pt-BR", { timeStyle: "short" }).format(sincronizadoEm)}
-          </span>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -221,33 +225,43 @@ async function TopClientes({
   );
 
   return (
-    <div className="cartao px-4 py-3.5">
-      <div className="text-[13px] text-[var(--tinta-2)]">Top 5 do ano</div>
+    <div className="cartao flex flex-col px-4 py-3.5 sm:col-span-2 lg:col-span-1">
+      <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--tinta-2)]">
+        <Trophy size={13.5} className="shrink-0 text-[var(--tinta-3)]" />
+        Top 5 do ano
+      </div>
       {!confiavel ? (
-        <p className="mt-2 text-[13px] text-[var(--tinta-3)]">
+        <p className="mt-2 text-[13px] leading-relaxed text-[var(--tinta-3)]">
           Indisponível: um ranking sobre carga parcial aponta o cliente errado.
         </p>
       ) : top.length === 0 ? (
         <p className="mt-2 text-[13px] text-[var(--tinta-3)]">Nenhum cliente com receita.</p>
       ) : (
-        <ol className="mt-2 space-y-1">
-          {top.map((c, i) => (
-            <li key={c.customerConexaId} className="flex items-baseline gap-2 text-[13px]">
-              <span className="w-3 text-[var(--tinta-3)]">{i + 1}</span>
-              <Link
-                href={`/carteira/${c.customerConexaId}`}
-                className="flex-1 truncate hover:underline"
-              >
-                {c.nome ?? `Cliente ${c.customerConexaId}`}
-              </Link>
-              <span className="num text-[var(--tinta-3)]">
-                {participacao(c.receita, total)?.toFixed(0) ?? "—"}%
-              </span>
-            </li>
-          ))}
+        <ol className="mt-2.5 space-y-1.5">
+          {top.map((c, i) => {
+            const share = participacao(c.receita, total);
+            return (
+              <li key={c.customerConexaId} className="flex items-center gap-2 text-[12.5px]">
+                <span className="num w-3 shrink-0 text-[var(--tinta-3)]">{i + 1}</span>
+                <Link
+                  href={`/carteira/${c.customerConexaId}`}
+                  className="min-w-0 flex-1 truncate hover:text-[var(--acento-tinta)] hover:underline"
+                >
+                  {c.nome ?? `Cliente ${c.customerConexaId}`}
+                </Link>
+                {/* A barra dá a proporção de relance; o número dá o valor. */}
+                <span aria-hidden className="barra hidden w-10 shrink-0 sm:block">
+                  <span style={{ width: `${Math.min(100, share ?? 0)}%` }} />
+                </span>
+                <span className="num w-8 shrink-0 text-right text-[var(--tinta-3)]">
+                  {share?.toFixed(0) ?? "—"}%
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
-      <div className="mt-2.5">
+      <div className="mt-auto pt-3">
         <Procedencia tipo={confiavel ? "DERIVADO" : "INDISPONIVEL"} />
       </div>
     </div>
@@ -278,27 +292,40 @@ async function QuedaDeReceita({
   if (emQueda.length === 0) return null;
 
   return (
-    <div className="cartao overflow-hidden">
-      <div className="border-b border-[var(--linha)] px-4 py-2.5 text-[13px] text-[var(--tinta-2)]">
-        Queda de receita em {rotuloMes(mesFechado)} — entre quem tem mês anterior para comparar
-      </div>
-      <table className="tabela">
-        <tbody>
-          {emQueda.map((m) => (
-            <tr key={m.customerConexaId}>
-              <td>
-                <Link href={`/carteira/${m.customerConexaId}`} className="hover:underline">
-                  {m.customer?.name ?? `Cliente ${m.customerConexaId}`}
-                </Link>
-              </td>
-              <td className={`num text-right ${corVariacao(Number(m.variacaoPct))}`}>
-                {pct(Number(m.variacaoPct))}
-              </td>
-              <td className="num w-32 text-right">{formatBRL(m.receita.toString())}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Painel
+      titulo={
+        <span className="flex items-center gap-1.5">
+          <TrendingDown size={14} className="text-[var(--critico-tinta)]" />
+          Queda de receita em {rotuloMes(mesFechado)}
+        </span>
+      }
+      rodape="Entre quem tem mês anterior para comparar."
+    >
+      <Rolante>
+        <table className="tabela">
+          <tbody>
+            {emQueda.map((m) => (
+              <tr key={m.customerConexaId}>
+                <td>
+                  <Link
+                    href={`/carteira/${m.customerConexaId}`}
+                    className="hover:text-[var(--acento-tinta)] hover:underline"
+                  >
+                    {m.customer?.name ?? `Cliente ${m.customerConexaId}`}
+                  </Link>
+                </td>
+                <td
+                  className={`num w-24 text-right font-medium ${corVariacao(Number(m.variacaoPct))}`}
+                >
+                  {pct(Number(m.variacaoPct))}
+                </td>
+                <td className="num w-32 text-right">{formatBRL(m.receita.toString())}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Rolante>
+    </Painel>
   );
 }
+

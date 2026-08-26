@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { ROTULO_ENTIDADE, type EstadoEspelho } from "@/lib/intel/completude";
+import { Faixa } from "./Cartao";
 
 /**
  * Aviso de espelho incompleto.
@@ -12,24 +14,27 @@ export function AvisoCompletude({ estado }: { estado: EstadoEspelho }) {
   if (estado.incompletas.length === 0) return null;
 
   const rotulos = estado.incompletas.map((e) => ROTULO_ENTIDADE[e]).join(", ");
-  const receitaAfetada = !estado.receitaConfiavel;
 
   return (
-    <div className="rounded border border-[color-mix(in_oklab,var(--atencao)_35%,transparent)] bg-[var(--wash-atencao)] px-4 py-3 text-sm text-[var(--atencao-tinta)]">
+    <Faixa tom="atencao">
       <p>
         <strong>Espelho incompleto.</strong> Ainda faltam dados de: {rotulos}.
       </p>
-      {receitaAfetada ? (
+      {!estado.receitaConfiavel ? (
         <p className="mt-1">
           Os valores de receita <strong>não são confiáveis</strong> e estão marcados como lacuna. Um
-          R$ 0,00 aqui significa &quot;ainda não carregado&quot;, <strong>não</strong> &quot;cliente sem
-          faturamento&quot;.
+          R$ 0,00 aqui significa &quot;ainda não carregado&quot;, <strong>não</strong> &quot;cliente
+          sem faturamento&quot;.
         </p>
       ) : null}
-      <p className="mt-1 text-xs">
-        Continue a carga em Motor — ela retoma de onde parou, não recomeça.
+      <p className="mt-1.5 text-[12.5px] text-[var(--tinta-3)]">
+        Continue a carga em{" "}
+        <Link href="/motor" className="font-medium text-[var(--acento-tinta)] hover:underline">
+          Motor
+        </Link>{" "}
+        — ela retoma de onde parou, não recomeça.
       </p>
-    </div>
+    </Faixa>
   );
 }
 

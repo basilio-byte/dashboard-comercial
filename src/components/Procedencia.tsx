@@ -9,13 +9,10 @@ import { cn } from "@/lib/ui";
  * quando a procedência é ruim.
  */
 const PAPEIS = {
-  API: { texto: "da API", classe: "text-[var(--tinta-3)] border-[var(--linha)]" },
-  DERIVADO: { texto: "derivado", classe: "text-[var(--tinta-3)] border-[var(--linha)]" },
-  MANUAL: { texto: "manual", classe: "text-[var(--atencao-tinta)] border-[color-mix(in_oklab,var(--atencao)_40%,transparent)]" },
-  INDISPONIVEL: {
-    texto: "indisponível",
-    classe: "text-[var(--atencao-tinta)] border-[color-mix(in_oklab,var(--atencao)_40%,transparent)]",
-  },
+  API: { texto: "da API", classe: "" },
+  DERIVADO: { texto: "derivado", classe: "" },
+  MANUAL: { texto: "manual", classe: "selo-atencao" },
+  INDISPONIVEL: { texto: "indisponível", classe: "selo-atencao" },
 } as const;
 
 export function Procedencia({
@@ -29,14 +26,7 @@ export function Procedencia({
 }) {
   const p = PAPEIS[tipo];
   return (
-    <span
-      title={detalhe}
-      className={cn(
-        "inline-flex items-center rounded border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide",
-        p.classe,
-        className,
-      )}
-    >
+    <span title={detalhe} className={cn("selo", p.classe, className)}>
       {p.texto}
     </span>
   );

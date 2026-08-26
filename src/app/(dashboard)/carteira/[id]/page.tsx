@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowLeft, Wallet, CalendarRange, Clock } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
 import { currentMonthKey, rotuloMes, ultimosMesesFechados } from "@/lib/dates";
@@ -8,6 +9,7 @@ import { corVariacao, pct } from "@/lib/ui";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { horasDoCliente } from "@/lib/intel/horas";
 import { BlocoHoras } from "@/components/Horas";
+import { Cartao, Faixa, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +38,9 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
   const mesCorrente = currentMonthKey();
   const doze = ultimosMesesFechados(12);
   const serie = mensais.filter((m) => doze.includes(m.mesKey) || m.mesKey === mesCorrente);
-  const planoIds = [...new Set(contratos.map((c) => c.planConexaId).filter((x): x is number => x !== null))];
+  const planoIds = [
+    ...new Set(contratos.map((c) => c.planConexaId).filter((x): x is number => x !== null)),
+  ];
   const planos = planoIds.length
     ? await prisma.plan.findMany({ where: { conexaId: { in: planoIds } } })
     : [];
@@ -45,143 +49,191 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
   const inelegivel = !cliente.isActive || cliente.isBlocked;
 
   return (
-    <div className="space-y-8">
-      <div>
-        <Link href="/carteira" className="text-sm text-[var(--tinta-3)] hover:underline">
-          ← Clientes
+    <>
+      <div className="mb-7">
+        <Link
+          href="/carteira"
+          className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--tinta-3)] transition-colors hover:text-[var(--tinta)]"
+        >
+          <ArrowLeft size={13} />
+          Carteira
         </Link>
-        <h1 className="mt-1 text-xl font-semibold">
-          {cliente.name ?? `Cliente ${conexaId}`}{" "}
-          <span className="text-base font-normal text-[var(--tinta-3)]">#{conexaId}</span>
-        </h1>
-        {inelegivel ? (
-          <p className="mt-2 rounded bg-[var(--superficie-sutil)] px-3 py-2 text-sm text-[var(--tinta-2)]">
-            Cliente {cliente.isBlocked ? "bloqueado" : "inativo"} no Conexa — <strong>não é elegível</strong>{" "}
-            para oferta. Ver ADR-0010.
-          </p>
-        ) : null}
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="titulo-pagina">{cliente.name ?? `Cliente ${conexaId}`}</h1>
+          <span className="num selo">#{conexaId}</span>
+          {inelegivel ? (
+            <span className="selo selo-atencao">
+              {cliente.isBlocked ? "bloqueado" : "inativo"}
+            </span>
+          ) : null}
+        </div>
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-3">
-        <Cartao titulo="Receita no ano" valor={formatBRL(perfil?.receitaAnoCorrente?.toString() ?? 0)} />
-        <Cartao titulo="Receita 12 meses" valor={formatBRL(perfil?.receita12Meses?.toString() ?? 0)} />
-        <div className="cartao px-4 py-3">
-          <div className="text-sm text-[var(--tinta-3)]">Horas inclusas por mês</div>
-          <div className="mt-1 text-2xl font-semibold num">
-            {perfil?.horasInclusasMes != null ? (
-              `${Number(perfil.horasInclusasMes)}h`
-            ) : perfil?.temContratoAtivo ? (
-              <span className="text-lg font-normal">sem cota</span>
-            ) : (
-              <span className="text-lg font-normal">
-                <Lacuna motivo="Cliente sem contrato ativo — não há plano de onde ler a cota" />
+      <div className="space-y-9">
+        {inelegivel ? (
+          <Faixa tom="atencao">
+            Cliente {cliente.isBlocked ? "bloqueado" : "inativo"} no Conexa —{" "}
+            <strong>não é elegível</strong> para oferta. Ver ADR-0010.
+          </Faixa>
+        ) : null}
+
+        <section className="grid gap-3 sm:grid-cols-3">
+          <Cartao
+            rotulo="Receita no ano"
+            Icone={Wallet}
+            valor={formatBRL(perfil?.receitaAnoCorrente?.toString() ?? 0)}
+            confiavel={espelho.receitaConfiavel}
+            contexto="regime de emissão"
+            detalheProcedencia="Soma de cobranças por data de emissão"
+          />
+          <Cartao
+            rotulo="Receita 12 meses"
+            Icone={CalendarRange}
+            valor={formatBRL(perfil?.receita12Meses?.toString() ?? 0)}
+            confiavel={espelho.receitaConfiavel}
+            contexto="meses fechados"
+            detalheProcedencia="Soma de cobranças por data de emissão"
+          />
+          <div className="cartao flex flex-col px-4 py-3.5">
+            <div className="flex items-center gap-1.5 text-[12.5px] font-medium text-[var(--tinta-2)]">
+              <Clock size={13.5} className="shrink-0 text-[var(--tinta-3)]" />
+              Horas inclusas por mês
+            </div>
+            <div className="num mt-2 text-[27px] font-semibold leading-none tracking-[-0.02em]">
+              {perfil?.horasInclusasMes != null ? (
+                `${Number(perfil.horasInclusasMes)}h`
+              ) : perfil?.temContratoAtivo ? (
+                <span className="text-[19px] text-[var(--tinta-3)]">sem cota</span>
+              ) : (
+                <span className="text-[19px]">
+                  <Lacuna motivo="Cliente sem contrato ativo — não há plano de onde ler a cota" />
+                </span>
+              )}
+            </div>
+            <div className="mt-auto flex items-center gap-2 pt-3 text-[11.5px] text-[var(--tinta-3)]">
+              <Procedencia tipo="API" detalhe="plan.hourQuotas" />
+              <span className="truncate">
+                {perfil?.horasInclusasMes == null && perfil?.temContratoAtivo
+                  ? "plano sem horas inclusas (não é zero)"
+                  : "concessão do plano"}
               </span>
-            )}
+            </div>
           </div>
-          <div className="mt-1 flex items-center gap-2 text-xs text-[var(--tinta-3)]">
-            <Procedencia tipo="API" detalhe="plan.hourQuotas" />
-            {perfil?.horasInclusasMes == null && perfil?.temContratoAtivo
-              ? "plano sem horas inclusas (não é zero)"
-              : "concessão do plano"}
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--tinta-3)]">Receita mês a mês</h2>
-        {serie.length === 0 ? (
-          <p className="mt-3 text-sm text-[var(--tinta-3)]">Sem receita registrada no período.</p>
-        ) : (
-          <div className="mt-3 overflow-x-auto cartao">
-            <table className="tabela">
-              <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Mês</th>
-                  <th className="px-4 py-2 text-right font-medium">Cobranças</th>
-                  <th className="px-4 py-2 text-right font-medium">Receita</th>
-                  <th className="px-4 py-2 text-right font-medium">Variação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--linha)]">
-                {serie.map((m) => (
-                  <tr key={m.mesKey} className={m.mesKey === mesCorrente ? "bg-[var(--wash-atencao)]" : ""}>
-                    <td className="px-4 py-2">
-                      {rotuloMes(m.mesKey)}
-                      {m.mesKey === mesCorrente ? (
-                        <span className="ml-2 text-xs text-[var(--atencao-tinta)]">mês em curso — incompleto</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-2 text-right num text-[var(--tinta-3)]">{m.cobrancas}</td>
-                    <td className="px-4 py-2 text-right num">{formatBRL(m.receita.toString())}</td>
-                    <td
-                      className={`px-4 py-2 text-right num ${corVariacao(
-                        m.variacaoPct === null ? null : Number(m.variacaoPct),
-                      )}`}
-                      title={m.variacaoPct === null ? "Mês anterior sem receita — não existe variação percentual" : undefined}
-                    >
-                      {pct(m.variacaoPct === null ? null : Number(m.variacaoPct))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-2 text-xs text-[var(--tinta-3)]">
-          O traço na variação significa <strong>mês anterior sem receita</strong> — não é queda de 100%.
-          O mês em curso aparece para consulta e <strong>nunca</strong> alimenta alerta de tendência.
-        </p>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--tinta-3)]">
-          Horas de sala por ciclo
-        </h2>
-        <div className="mt-3">
-          <BlocoHoras dados={horas} confiavel={espelho.horasConfiavel} />
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--tinta-3)]">Contratos</h2>
-        {contratos.length === 0 ? (
-          <p className="mt-3 text-sm text-[var(--tinta-3)]">Nenhum contrato.</p>
-        ) : (
-          <div className="mt-3 overflow-x-auto cartao">
-            <table className="tabela">
-              <thead className="border-b border-[var(--linha)] text-left text-xs uppercase tracking-wide text-[var(--tinta-3)]">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Plano</th>
-                  <th className="px-4 py-2 font-medium">Início</th>
-                  <th className="px-4 py-2 font-medium">Fim</th>
-                  <th className="px-4 py-2 text-right font-medium">Horas/mês</th>
-                  <th className="px-4 py-2 text-right font-medium">Valor</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--linha)]">
-                {contratos.map((c) => {
-                  const plano = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
-                  return (
-                    <tr key={c.conexaId} className={c.isActive ? "" : "text-[var(--tinta-3)]"}>
-                      <td className="px-4 py-2">
-                        {plano?.name ?? c.contractSummary ?? `Plano ${c.planConexaId ?? "?"}`}
-                        {!c.isActive ? <span className="ml-2 text-xs">encerrado</span> : null}
-                      </td>
-                      <td className="px-4 py-2 num">{fmtData(c.startDate)}</td>
-                      <td className="px-4 py-2 num">{fmtData(c.endDate)}</td>
-                      <td className="px-4 py-2 text-right num">
-                        {plano?.horasInclusasMes != null ? `${Number(plano.horasInclusasMes)}h` : "sem cota"}
-                      </td>
-                      <td className="px-4 py-2 text-right num">{formatBRL(c.amount.toString())}</td>
+        <Secao titulo="Receita mês a mês">
+          {serie.length === 0 ? (
+            <Vazio>Sem receita registrada no período.</Vazio>
+          ) : (
+            <Painel
+              rodape={
+                <>
+                  O traço na variação significa <strong>mês anterior sem receita</strong> — não é
+                  queda de 100%. O mês em curso aparece para consulta e <strong>nunca</strong>{" "}
+                  alimenta alerta de tendência.
+                </>
+              }
+            >
+              <Rolante>
+                <table className="tabela">
+                  <thead>
+                    <tr>
+                      <th>Mês</th>
+                      <th className="text-right">Cobranças</th>
+                      <th className="text-right">Receita</th>
+                      <th className="text-right">Variação</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </div>
+                  </thead>
+                  <tbody>
+                    {serie.map((m) => (
+                      <tr
+                        key={m.mesKey}
+                        className={m.mesKey === mesCorrente ? "linha-curso" : undefined}
+                      >
+                        <td>
+                          {rotuloMes(m.mesKey)}
+                          {m.mesKey === mesCorrente ? (
+                            <span className="selo selo-atencao ml-2">em curso · incompleto</span>
+                          ) : null}
+                        </td>
+                        <td className="num text-right text-[var(--tinta-3)]">{m.cobrancas}</td>
+                        <td className="num text-right font-medium">
+                          {formatBRL(m.receita.toString())}
+                        </td>
+                        <td
+                          className={`num text-right ${corVariacao(
+                            m.variacaoPct === null ? null : Number(m.variacaoPct),
+                          )}`}
+                          title={
+                            m.variacaoPct === null
+                              ? "Mês anterior sem receita — não existe variação percentual"
+                              : undefined
+                          }
+                        >
+                          {pct(m.variacaoPct === null ? null : Number(m.variacaoPct))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Rolante>
+            </Painel>
+          )}
+        </Secao>
+
+        <Secao titulo="Horas de sala por ciclo">
+          <BlocoHoras dados={horas} confiavel={espelho.horasConfiavel} />
+        </Secao>
+
+        <Secao titulo="Contratos">
+          {contratos.length === 0 ? (
+            <Vazio>Nenhum contrato.</Vazio>
+          ) : (
+            <Painel>
+              <Rolante>
+                <table className="tabela">
+                  <thead>
+                    <tr>
+                      <th>Plano</th>
+                      <th>Início</th>
+                      <th>Fim</th>
+                      <th className="text-right">Horas/mês</th>
+                      <th className="text-right">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contratos.map((c) => {
+                      const plano =
+                        c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
+                      return (
+                        <tr key={c.conexaId} className={c.isActive ? undefined : "opacity-55"}>
+                          <td className="font-medium">
+                            {plano?.name ?? c.contractSummary ?? `Plano ${c.planConexaId ?? "?"}`}
+                            {!c.isActive ? <span className="selo ml-2">encerrado</span> : null}
+                          </td>
+                          <td className="num text-[var(--tinta-2)]">{fmtData(c.startDate)}</td>
+                          <td className="num text-[var(--tinta-2)]">{fmtData(c.endDate)}</td>
+                          <td className="num text-right">
+                            {plano?.horasInclusasMes != null ? (
+                              `${Number(plano.horasInclusasMes)}h`
+                            ) : (
+                              <span className="text-[var(--tinta-3)]">sem cota</span>
+                            )}
+                          </td>
+                          <td className="num text-right font-medium">
+                            {formatBRL(c.amount.toString())}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </Rolante>
+            </Painel>
+          )}
+        </Secao>
+      </div>
+    </>
   );
 }
 
@@ -190,14 +242,3 @@ function fmtData(d: Date | null): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(d);
 }
 
-function Cartao({ titulo, valor }: { titulo: string; valor: string }) {
-  return (
-    <div className="cartao px-4 py-3">
-      <div className="text-sm text-[var(--tinta-3)]">{titulo}</div>
-      <div className="mt-1 text-2xl font-semibold num">{valor}</div>
-      <div className="mt-1">
-        <Procedencia tipo="DERIVADO" detalhe="Soma de cobranças por data de emissão" />
-      </div>
-    </div>
-  );
-}

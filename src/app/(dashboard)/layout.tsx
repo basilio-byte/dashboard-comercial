@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { usuarioAtual } from "@/lib/auth/session";
-import { sair } from "@/lib/auth/actions";
 import { Lateral } from "@/components/Lateral";
+import { BarraSuperior } from "@/components/BarraSuperior";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Guarda no LAYOUT, não em cada página: página nova nasce protegida por
@@ -11,30 +11,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen">
-      {/* Lateral escura fixa: dá identidade própria e libera a largura toda do
-          conteúdo para a fila, que é o produto. */}
-      <aside className="sticky top-0 hidden h-screen w-[212px] shrink-0 bg-[var(--marca)] md:block">
-        <Lateral nome={usuario.name} />
+      {/* Lateral fixa: dá identidade própria e libera a largura toda do
+          conteúdo para a fila, que é o produto. No celular ela some e vira a
+          gaveta da barra superior. */}
+      <aside className="sticky top-0 hidden h-screen w-[236px] shrink-0 border-r border-[var(--marca-borda)] md:block">
+        <Lateral nome={usuario.name} email={usuario.email} />
       </aside>
 
-      {/* No celular a lateral vira uma faixa superior compacta. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="bg-[var(--marca)] px-4 py-2 md:hidden">
-          <Lateral nome={usuario.name} />
-        </div>
-
-        <div className="flex items-center justify-end px-6 pt-4">
-          <form action={sair}>
-            <button
-              type="submit"
-              className="rounded-md px-2 py-1 text-[13px] text-[var(--tinta-3)] transition-colors hover:bg-[var(--superficie-sutil)] hover:text-[var(--tinta)]"
-            >
-              sair
-            </button>
-          </form>
-        </div>
-
-        <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-14 pt-2">{children}</main>
+        <BarraSuperior nome={usuario.name} email={usuario.email} />
+        <main className="mx-auto w-full max-w-[1180px] flex-1 px-4 pb-20 pt-7 sm:px-6 lg:px-8">
+          {children}
+        </main>
       </div>
     </div>
   );
