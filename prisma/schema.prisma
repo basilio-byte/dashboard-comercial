@@ -283,6 +283,50 @@ model Charge {
   @@map("fact_charges")
 }
 
+/// Reserva de sala. É o consumo de horas — a outra metade do saldo.
+///
+/// ⚠ Os campos de horário são `startTime`/`finalTime`, **não** `startAt`. O
+/// documento de especificação registra isso como armadilha já vivida.
+///
+/// `status` carrega a informação central: **`deductedFromQuota`** marca a
+/// reserva que o próprio Conexa abateu da cota do cliente. Isso dispensa saber
+/// quais salas compõem o grupo da cota — a pergunta "esta reserva consome a
+/// cota?" já vem respondida no dado. Ver ADR-0005 e fase-0-conclusoes.md.
+model RoomBooking {
+  conexaId         Int       @id
+  customerConexaId Int?
+  personConexaId   Int?
+  saleConexaId     Int?
+  placeConexaId    Int?
+  placeName        String?
+
+  status           String? // deductedFromQuota | billed | notBilled | ...
+  isActive         Boolean   @default(true)
+  isBilled         Boolean   @default(false)
+  completed        Boolean   @default(false)
+  cancellationReason String?
+  recurringBookingId Int?
+
+  startTime DateTime?
+  finalTime DateTime?
+  /// Duração em horas, materializada: (finalTime - startTime). Evita recalcular
+  /// a diferença a cada agregação e permite somar no banco.
+  horas     Decimal?  @db.Decimal(10, 4)
+  /// Data-calendário do início, no fuso da empresa — para cortar por ciclo
+  /// usando índice.
+  dataLocal DateTime? @db.Date
+
+  createdAtConexa DateTime?
+  updatedAtConexa DateTime?
+  raw             Json
+  syncedAt        DateTime  @default(now())
+
+  @@index([customerConexaId, dataLocal])
+  @@index([status])
+  @@index([dataLocal])
+  @@map("fact_room_bookings")
+}
+
 // ===========================================================================
 // Inteligência comercial — derivados
 // ===========================================================================

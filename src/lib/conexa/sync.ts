@@ -9,6 +9,7 @@ import {
   mapCustomer,
   mapPlan,
   mapProduct,
+  mapRoomBooking,
   mapSale,
   mapServiceCategory,
 } from "./mappers";
@@ -19,6 +20,7 @@ import type {
   ConexaCustomer,
   ConexaPlan,
   ConexaProduct,
+  ConexaRoomBooking,
   ConexaSale,
   ConexaServiceCategory,
 } from "./types";
@@ -270,19 +272,43 @@ export async function syncDimensoes(signal?: AbortSignal): Promise<SyncResultado
  * o rate limit compartilhado.
  */
 export async function syncBackfill(
-  opts: { maxPaginasPorEntidade?: number; signal?: AbortSignal } = {},
+  opts: {
+    maxPaginasPorEntidade?: number;
+    signal?: AbortSignal;
+    /**
+     * Restringe a carga a estas entidades. Sem isto, a ordem é sempre a mesma e
+     * quem está no fim da fila (reservas) só começa depois de tudo antes dela
+     * terminar — o que, no ritmo conservador de 15 req/min, são horas. Poder
+     * priorizar é requisito de operação, não conveniência.
+     */
+    entidades?: string[];
+  } = {},
 ): Promise<SyncResultado> {
   const runId = await abrirRun("backfill");
   const hb = iniciarHeartbeat(runId);
   const ctx: Ctx = { runId, signal: opts.signal, lidos: 0, gravados: 0 };
   let status: "SUCCESS" | "HALTED" = "SUCCESS";
   try {
-    const entidades = [
+    const todas = [
       { recurso: "customers", nome: "customers", mapear: mapCustomer, gravar: gravadorDe(prisma.customer as never) },
       { recurso: "contracts", nome: "contracts", mapear: mapContract, gravar: gravadorDe(prisma.contract as never) },
       { recurso: "charges", nome: "charges", mapear: mapCharge, gravar: gravadorDe(prisma.charge as never) },
       { recurso: "sales", nome: "sales", mapear: mapSale, gravar: gravadorDe(prisma.sale as never) },
+      {
+        recurso: "room/bookings",
+        nome: "bookings",
+        mapear: mapRoomBooking,
+        gravar: gravadorDe(prisma.roomBooking as never),
+      },
     ];
+    const entidades = opts.entidades?.length
+      ? todas.filter((e) => opts.entidades!.includes(e.nome))
+      : todas;
+    if (!entidades.length) {
+      throw new Error(
+        `Nenhuma entidade conhecida em [${opts.entidades?.join(", ")}]. Válidas: ${todas.map((e) => e.nome).join(", ")}.`,
+      );
+    }
     for (const e of entidades) {
       const r = await sincronizarEntidade(e as never, ctx, {
         retomar: true,
@@ -310,4 +336,4 @@ export async function backfillPendente(): Promise<string[]> {
   return estados.map((e) => e.key.replace(":offset", ""));
 }
 
-export type { ConexaCharge, ConexaContract, ConexaCustomer, ConexaSale };
+export type { ConexaCharge, ConexaContract, ConexaCustomer, ConexaRoomBooking, ConexaSale };

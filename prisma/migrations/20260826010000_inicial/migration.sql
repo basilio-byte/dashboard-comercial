@@ -192,6 +192,32 @@ CREATE TABLE "fact_charges" (
 );
 
 -- CreateTable
+CREATE TABLE "fact_room_bookings" (
+    "conexaId" INTEGER NOT NULL,
+    "customerConexaId" INTEGER,
+    "personConexaId" INTEGER,
+    "saleConexaId" INTEGER,
+    "placeConexaId" INTEGER,
+    "placeName" TEXT,
+    "status" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "isBilled" BOOLEAN NOT NULL DEFAULT false,
+    "completed" BOOLEAN NOT NULL DEFAULT false,
+    "cancellationReason" TEXT,
+    "recurringBookingId" INTEGER,
+    "startTime" TIMESTAMP(3),
+    "finalTime" TIMESTAMP(3),
+    "horas" DECIMAL(10,4),
+    "dataLocal" DATE,
+    "createdAtConexa" TIMESTAMP(3),
+    "updatedAtConexa" TIMESTAMP(3),
+    "raw" JSONB NOT NULL,
+    "syncedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "fact_room_bookings_pkey" PRIMARY KEY ("conexaId")
+);
+
+-- CreateTable
 CREATE TABLE "intel_customer_monthly_revenue" (
     "id" TEXT NOT NULL,
     "customerConexaId" INTEGER NOT NULL,
@@ -325,6 +351,15 @@ CREATE INDEX "fact_charges_emissionDate_idx" ON "fact_charges"("emissionDate");
 
 -- CreateIndex
 CREATE INDEX "fact_charges_paymentDate_idx" ON "fact_charges"("paymentDate");
+
+-- CreateIndex
+CREATE INDEX "fact_room_bookings_customerConexaId_dataLocal_idx" ON "fact_room_bookings"("customerConexaId", "dataLocal");
+
+-- CreateIndex
+CREATE INDEX "fact_room_bookings_status_idx" ON "fact_room_bookings"("status");
+
+-- CreateIndex
+CREATE INDEX "fact_room_bookings_dataLocal_idx" ON "fact_room_bookings"("dataLocal");
 
 -- CreateIndex
 CREATE INDEX "intel_customer_monthly_revenue_mesKey_idx" ON "intel_customer_monthly_revenue"("mesKey");

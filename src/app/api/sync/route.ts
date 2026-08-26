@@ -25,13 +25,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: "Não autorizado." }, { status: 401 });
   }
 
-  const modo = new URL(req.url).searchParams.get("mode") ?? "reconcile";
+  const params = new URL(req.url).searchParams;
+  const modo = params.get("mode") ?? "reconcile";
+  // `entity=bookings,contracts` restringe a carga — permite priorizar quando o
+  // ritmo é conservador e a fila inteira levaria horas.
+  const entidades = params.get("entity")?.split(",").map((s) => s.trim()).filter(Boolean);
   try {
     switch (modo) {
       case "dimensions":
         return NextResponse.json(await syncDimensoes());
       case "backfill":
-        return NextResponse.json(await syncBackfill({ maxPaginasPorEntidade: 50 }));
+        return NextResponse.json(await syncBackfill({ maxPaginasPorEntidade: 50, entidades }));
       case "intelligence":
         return NextResponse.json(await consolidarTudo());
       default:

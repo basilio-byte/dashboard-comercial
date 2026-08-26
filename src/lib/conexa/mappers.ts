@@ -8,6 +8,7 @@ import type {
   ConexaHourQuota,
   ConexaPlan,
   ConexaProduct,
+  ConexaRoomBooking,
   ConexaSale,
   ConexaServiceCategory,
 } from "./types";
@@ -187,5 +188,50 @@ export function mapCharge(c: ConexaCharge) {
     createdAtConexa: instante(c.createdAt),
     updatedAtConexa: instante(c.updatedAt),
     raw: json(c),
+  };
+}
+
+/**
+ * Duração da reserva em horas.
+ *
+ * `null` quando falta uma das pontas ou o intervalo é inválido — nunca zero.
+ * Zero significaria "reserva de duração nula", que é diferente de "não sei
+ * quanto durou", e a segunda coisa não pode entrar numa soma de consumo.
+ */
+export function duracaoEmHoras(
+  inicio: string | null | undefined,
+  fim: string | null | undefined,
+): Prisma.Decimal | null {
+  if (!inicio || !fim) return null;
+  const a = new Date(inicio).getTime();
+  const b = new Date(fim).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b) || b <= a) return null;
+  return new Prisma.Decimal((b - a) / 3_600_000).toDecimalPlaces(4);
+}
+
+export function mapRoomBooking(b: ConexaRoomBooking) {
+  if (!b.bookingId) return null;
+  return {
+    conexaId: b.bookingId,
+    customerConexaId: b.customerId ?? null,
+    personConexaId: b.personId ?? null,
+    saleConexaId: b.saleId ?? null,
+    placeConexaId: b.place?.id ?? null,
+    placeName: b.place?.name ?? null,
+    status: b.status ?? null,
+    isActive: b.isActive ?? true,
+    isBilled: b.isBilled ?? false,
+    completed: b.completed ?? false,
+    cancellationReason: b.cancellationReason ?? null,
+    recurringBookingId: b.idRecurringBooking ?? null,
+    startTime: instante(b.startTime),
+    finalTime: instante(b.finalTime),
+    horas: duracaoEmHoras(b.startTime, b.finalTime),
+    // Data-calendário do início no fuso da empresa: o corte de ciclo é no
+    // relógio de parede, e reserva das 22h de 25/09 é do dia 25.
+    dataLocal: timestampParaDataLocal(b.startTime),
+    createdAtConexa: instante(b.createdAt),
+    updatedAtConexa: instante(b.updatedAt),
+    raw: json(b),
   };
 }

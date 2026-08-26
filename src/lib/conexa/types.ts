@@ -136,3 +136,26 @@ export interface ConexaCharge {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export interface ConexaRoomBooking {
+  bookingId?: number;
+  customerId?: number;
+  personId?: number;
+  saleId?: number | null;
+  place?: { id?: number; name?: string } | null;
+  /**
+   * ⚠ Valor central para o cálculo de horas: `deductedFromQuota` marca a
+   * reserva que o Conexa abateu da cota do cliente.
+   */
+  status?: string;
+  isActive?: boolean;
+  isBilled?: boolean;
+  completed?: boolean;
+  cancellationReason?: string | null;
+  idRecurringBooking?: number | null;
+  /** ⚠ `startTime`/`finalTime`, NÃO `startAt`. */
+  startTime?: string;
+  finalTime?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

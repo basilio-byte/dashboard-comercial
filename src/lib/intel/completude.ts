@@ -19,7 +19,7 @@ import { prisma } from "@/lib/db";
  */
 
 /** Entidades cuja completude importa para algum número exibido. */
-export const ENTIDADES = ["customers", "contracts", "charges", "sales"] as const;
+export const ENTIDADES = ["customers", "contracts", "charges", "sales", "bookings"] as const;
 export type Entidade = (typeof ENTIDADES)[number];
 
 export interface EstadoEntidade {
@@ -35,6 +35,8 @@ export interface EstadoEspelho {
   entidades: EstadoEntidade[];
   /** Dá para apresentar receita como fato? Exige clientes E cobranças completos. */
   receitaConfiavel: boolean;
+  /** Dá para apresentar consumo de horas? Exige contratos E reservas completos. */
+  horasConfiavel: boolean;
   incompletas: Entidade[];
 }
 
@@ -43,6 +45,7 @@ const CONTADOR: Record<Entidade, () => Promise<number>> = {
   contracts: () => prisma.contract.count(),
   charges: () => prisma.charge.count(),
   sales: () => prisma.sale.count(),
+  bookings: () => prisma.roomBooking.count(),
 };
 
 export async function estadoDoEspelho(): Promise<EstadoEspelho> {
@@ -71,6 +74,7 @@ export async function estadoDoEspelho(): Promise<EstadoEspelho> {
   return {
     entidades,
     receitaConfiavel: completa("customers") && completa("charges"),
+    horasConfiavel: completa("contracts") && completa("bookings"),
     incompletas,
   };
 }
@@ -81,4 +85,5 @@ export const ROTULO_ENTIDADE: Record<Entidade, string> = {
   contracts: "contratos",
   charges: "cobranças",
   sales: "vendas",
+  bookings: "reservas de sala",
 };

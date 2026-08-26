@@ -19,11 +19,11 @@ export async function acaoSincronizarCadastros() {
   return r;
 }
 
-export async function acaoBackfill() {
+export async function acaoBackfill(entidades?: string[]) {
   await exigirAdmin();
   // Teto de páginas por execução: a carga cabe numa janela e não monopoliza o
   // rate limit compartilhado com o financeiro. Retomável — basta rodar de novo.
-  const r = await syncBackfill({ maxPaginasPorEntidade: 25 });
+  const r = await syncBackfill({ maxPaginasPorEntidade: 25, entidades });
   revalidatePath("/operacao");
   return r;
 }
