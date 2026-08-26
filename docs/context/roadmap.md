@@ -1,5 +1,21 @@
 # Roadmap
 
+> ⚠ **Atualizado em 2026-08-26.** Este roadmap foi escrito antes da Fase 0 e o
+> plano mudou com o que ela mediu. O estado real, sempre atual, está em
+> [progress.md](progress.md) — leia-o antes deste arquivo.
+>
+> **Já feito:** Fase 0 (veredito GO) · Fase 1 (espelho, métricas, telas) · parte
+> da Fase 2 (reservas carregadas) · parte da Fase 3 (ciclo de horas e sinal de
+> excedente, com o saldo ainda **não validado**).
+>
+> **O que mudou de rota:**
+> - a carga é por **janela mensal**, não por offset — a API não é ordenada;
+> - as regras 8 e 10 **não estão bloqueadas** (a Fase 0 desbloqueou as duas);
+> - surgiu um gatilho novo, pedido pelo responsável: **excedente recorrente de
+>   horas**, hoje o único ativo;
+> - surgiu um bloqueio novo: **o vendedor responsável não é resolvível pela
+>   API**, o que trava o roteamento e, com ele, a fase de disparo.
+
 Princípio de faseamento: **cada fase pode parar e ainda ter entregue valor**, e nenhuma fase
 escreve num sistema de terceiro antes de o dado que a sustenta ter sido provado.
 

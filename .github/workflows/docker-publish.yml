@@ -18,7 +18,24 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # ⚠ Publicar sem verificar é publicar defeito. O workflow anterior buildava e
+  # empurrava a imagem direto, então um typecheck quebrado ou um teste vermelho
+  # chegava em produção pelo caminho mais curto que existe.
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm run test
+
   build-and-push:
+    needs: verificar
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -58,11 +58,23 @@ Pré-requisitos: Node 20+, Docker.
 
 ```bash
 npm install
-cp .env.example .env          # preencha SESSION_SECRET e ADMIN_EMAIL/ADMIN_PASSWORD
+cp .env.example .env          # preencha SESSION_SECRET
 docker compose up -d db       # Postgres na porta 5433 (5432 é do financeiro)
 npm run prisma:migrate
+npm run db:seed               # dados SINTÉTICOS — não precisa de token do Conexa
 npm run dev                   # http://localhost:7000
 ```
+
+Login do seed: **admin@seahub.local** / **seahub-dev-123**.
+
+> O seed existe para o sistema ser utilizável **sem credencial de produção**. Sem
+> ele, a única forma de ver uma tela com número seria apontar a máquina de
+> desenvolvimento para a API real e gastar ~1.270 requisições do teto
+> compartilhado. Os dados são inventados e ficam numa faixa de id (900000+) que
+> não colide com o Conexa.
+>
+> Depois do seed, rode **Motor → Consolidar inteligência** para as telas de
+> receita se preencherem.
 
 | Script | Ação |
 |---|---|
@@ -71,7 +83,8 @@ npm run dev                   # http://localhost:7000
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test` | testes (Vitest) |
 | `npm run prisma:migrate` | cria/aplica migrations (dev) |
-| `npm run fase0` | **as provas de acesso da Fase 0** (ver abaixo) |
+| `npm run db:seed` | popula o banco com dados sintéticos (sem token) |
+| `npm run fase0` | as provas de acesso da Fase 0 |
 
 ## Fase 0 — provas de acesso
 
@@ -118,11 +131,21 @@ ninguém clicar em nada.
 
 ## Estado atual
 
-**Esqueleto no ar, verificado ponta a ponta:** imagem Docker builda, migrations aplicam no boot,
-admin é criado de forma idempotente, healthcheck responde 200 e o `docker stop` encerra limpo.
+**No ar no Easypanel**, porta 7000, com agendador embutido continuando a carga sozinho.
 
-**Nenhuma regra de negócio implementada.** O próximo passo é a **Fase 0** do
-[roadmap](docs/context/roadmap.md) — as provas de acesso que decidem o escopo real do projeto.
+**Funciona hoje:** espelho do Conexa por janela mensal (clientes, contratos, planos, produtos,
+categorias, vendas, cobranças, reservas) · receita por cliente e por mês com variação · consumo de
+horas por ciclo com o sinal de **excedente recorrente** · reconciliação · as telas
+**Radar · Carteira · Gatilhos · Confiança · Motor**.
+
+**Ainda NÃO existe:** motor das 10 regras (`src/lib/regras/`), camada de disparo
+(`src/lib/disparo/`) e cadastro de vendedor. Nenhuma task é criada no ClickUp.
+
+🔴 **Bloqueio atual:** o vendedor responsável **não é resolvível pela API** — ver
+[perguntas-abertas.md](docs/context/perguntas-abertas.md). Sem ele, um sinal não tem dono.
+
+Ponto de retomada detalhado: [progress.md](docs/context/progress.md) e
+[roadmap.md](docs/context/roadmap.md).
 
 ## Regra permanente
 
