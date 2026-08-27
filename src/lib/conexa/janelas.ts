@@ -71,6 +71,13 @@ export interface DefinicaoEntidade {
    * Nenhuma rota aceita `updatedAtFrom` (verificado nas 43 rotas GET da coleção
    * Postman), então não existe "me dê o que mudou". Só revarrer.
    *
+   * ⚠ A tabela acima é REPRODUZÍVEL: `node --env-file=.env
+   * scripts/prova-consistencia.mjs` a reimprime contra a API. Se os números
+   * divergirem, um dos dois está velho — e a decisão de profundidade tem que
+   * ser refeita, não remendada. (Na primeira versão estes números vinham de uma
+   * sonda descartável em /tmp: o comentário citava medição que ninguém
+   * conseguia refazer, o que é indistinguível de citar medição inventada.)
+   *
    * ⚠ `customers` não devolve `updatedAt`: a deriva dele é **não observável**.
    * O 6 abaixo é postura de risco, não medição — o cadastro carrega
    * `isActive`/`isBlocked`, que é o portão de elegibilidade de toda regra, e

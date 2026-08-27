@@ -196,6 +196,56 @@ async function prova1() {
     );
   }
   diz("");
+
+  // ── DEFASAGEM: quanto tempo DEPOIS o registro muda ──────────────────────
+  //
+  // ⚠ A tabela acima conta "mudou de mes", que e grosseiro demais para decidir
+  // profundidade de revisita: um registro alterado no dia seguinte, se cruzar a
+  // virada do mes, conta igual a um alterado um ano depois. O numero que decide
+  // `mesesDeRevisita` e a DISTRIBUICAO da defasagem — e ela precisa sair de um
+  // script VERSIONADO, nao de uma sonda descartavel, senao o comentario de
+  // `janelas.ts` cita uma medicao que ninguem consegue refazer. Foi exatamente
+  // o que aconteceu: os numeros daquele comentario sairam de um arquivo em
+  // /tmp que nao existe mais.
+  diz("### Defasagem entre criacao e alteracao — o que fixa `mesesDeRevisita`");
+  diz("");
+  diz("| entidade | alterados | p50 | p90 | max | > 90d |");
+  diz("| --- | --- | --- | --- | --- | --- |");
+  for (const a of alvos) {
+    const r = await pedir(a.caminho, {
+      createdAtFrom: a.de + "T00:00:00-03:00",
+      createdAtTo: a.ate + "T23:59:59-03:00",
+      limit: 100,
+      offset: 0,
+    });
+    const lista = itens(r.dados);
+    if (!lista.length || !lista.some((x) => x.updatedAt)) {
+      diz("| `" + a.nome + "` | — | — | — | — | **nao expoe `updatedAt`** |");
+      continue;
+    }
+    const dias = lista
+      .filter((x) => x.createdAt && x.updatedAt)
+      .map((x) => (Date.parse(x.updatedAt) - Date.parse(x.createdAt)) / 86400000)
+      .filter((d) => d > 0.02) // ~30 min: abaixo disso e a propria escrita
+      .sort((x, y) => x - y);
+    if (!dias.length) {
+      diz("| `" + a.nome + "` | 0 de " + lista.length + " | — | — | — | 0 |");
+      continue;
+    }
+    const q = (f) => dias[Math.min(dias.length - 1, Math.floor(dias.length * f))].toFixed(0);
+    const pct = ((dias.length / lista.length) * 100).toFixed(0);
+    diz(
+      "| `" + a.nome + "` | " + dias.length + "/" + lista.length + " (" + pct + "%) | " +
+        q(0.5) + "d | " + q(0.9) + "d | " + dias.at(-1).toFixed(0) + "d | **" +
+        dias.filter((d) => d > 90).length + "** |",
+    );
+  }
+  diz("");
+  diz("> A coluna **> 90d** e a que decide: e o que escapa de um incremental de 3 meses.");
+  diz("> Estes numeros sustentam `mesesDeRevisita` em `src/lib/conexa/janelas.ts`.");
+  diz("> Se divergirem da tabela do comentario de la, um dos dois esta velho.");
+  diz("");
+
   // O caso que mais dói: reserva antiga cancelada depois. O espelho a conta como
   // hora consumida para sempre.
   const b = achados["room/bookings"];
