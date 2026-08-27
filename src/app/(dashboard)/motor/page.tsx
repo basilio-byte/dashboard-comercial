@@ -63,9 +63,14 @@ export default async function Motor() {
         {produtos.semCadastro > 0 ? (
           <Faixa tom="atencao">
             <strong>
-              {produtos.semCadastro} produto(s) aparecem em vendas mas não estão no catálogo.
+              {produtos.semCadastro} produto(s) aparecem em vendas mas não estão no catálogo
             </strong>{" "}
-            A API do Conexa não devolve salas e espaços em{" "}
+            — e passam por eles{" "}
+            <strong>
+              {produtos.vendasOrfas.toLocaleString("pt-BR")} vendas ({produtos.pctVendasOrfas}% do
+              total)
+            </strong>
+            . A API do Conexa não devolve salas e espaços em{" "}
             <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/products</code> —
             ela responde 404 por permissão. Toda regra que depende de{" "}
             <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">productId</code>{" "}

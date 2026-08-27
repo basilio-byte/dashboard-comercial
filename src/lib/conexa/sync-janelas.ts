@@ -558,20 +558,47 @@ export async function coberturaDeProdutos(): Promise<{
   noCatalogo: number;
   vendidos: number;
   semCadastro: number;
+  /** Vendas ligadas a produto que não está no catálogo. */
+  vendasOrfas: number;
+  /** Quanto do total de vendas isso representa, em %. */
+  pctVendasOrfas: number;
 }> {
-  const [noCatalogo, distintos] = await Promise.all([
+  const [noCatalogo, distintos, totalVendas] = await Promise.all([
     prisma.product.count(),
     prisma.sale.findMany({
       where: { productConexaId: { not: null } },
       select: { productConexaId: true },
       distinct: ["productConexaId"],
     }),
+    prisma.sale.count(),
   ]);
   const ids = distintos.map((s) => s.productConexaId!).filter((x) => x !== null);
-  const conhecidos = ids.length
-    ? await prisma.product.count({ where: { conexaId: { in: ids } } })
+  const noCat = ids.length
+    ? await prisma.product.findMany({
+        where: { conexaId: { in: ids } },
+        select: { conexaId: true },
+      })
+    : [];
+  const conhecidos = new Set(noCat.map((p) => p.conexaId));
+  const orfaos = ids.filter((id) => !conhecidos.has(id));
+
+  /**
+   * ⚠ Contar PRODUTOS órfãos não diz se o buraco importa. 288 produtos com três
+   * vendas cada é ruído; 288 produtos com metade das vendas é grave. A pergunta
+   * certa é quanto do movimento passa por eles — e ela é respondível com o dado
+   * que já temos, sem custo de API.
+   */
+  const vendasOrfas = orfaos.length
+    ? await prisma.sale.count({ where: { productConexaId: { in: orfaos } } })
     : 0;
-  return { noCatalogo, vendidos: ids.length, semCadastro: ids.length - conhecidos };
+
+  return {
+    noCatalogo,
+    vendidos: ids.length,
+    semCadastro: orfaos.length,
+    vendasOrfas,
+    pctVendasOrfas: totalVendas > 0 ? Math.round((vendasOrfas / totalVendas) * 1000) / 10 : 0,
+  };
 }
 
 /**

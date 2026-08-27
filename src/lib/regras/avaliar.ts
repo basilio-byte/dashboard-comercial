@@ -242,9 +242,21 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
   const comprouSeaBox = produtosSeaBox.some(
     (p) => p.serviceCategoryConexaId !== null && idsCatSeaBox.has(p.serviceCategoryConexaId),
   );
-  const posseSeabox = comprouSeaBox
-    ? ("POR_COMPRA" as const)
-    : posseDoProduto({ produtoAlvo: -1, comprados: [], cortesiasDoPlano: null });
+
+  /**
+   * ⚠ Terceira via de posse, descoberta olhando a produção em 2026-08-27: a
+   * categoria SeaBox tem **6 PLANOS**, não só produtos. Então o cliente pode ter
+   * SeaBox por CONTRATO, e não apenas por venda avulsa.
+   *
+   * Eu só olhava `/sales`. Um cliente com contrato de SeaBox ativo receberia a
+   * oferta de SeaBox — a reoferta exata que a supressão existe para impedir.
+   */
+  const temContratoSeaBox = contratos.some((c) => ehSegmentoSeaBox(categoriaDo(c.planConexaId)));
+
+  const posseSeabox =
+    comprouSeaBox || temContratoSeaBox
+      ? ("POR_COMPRA" as const)
+      : posseDoProduto({ produtoAlvo: -1, comprados: [], cortesiasDoPlano: null });
   sinais.push(
     !estreou
       ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
@@ -256,7 +268,9 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
         // oferta específica já foi atendida.
         posseSeabox === "POR_COMPRA"
         ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-            `Estreou em ${fmtDia(primeira!)}, mas o cliente JÁ COMPROU SeaBox — não reofertar.`)
+            `Estreou em ${fmtDia(primeira!)}, mas o cliente JÁ TEM SeaBox (${
+              temContratoSeaBox ? "contrato ativo" : "compra registrada"
+            }) — não reofertar.`)
         : ambiguo("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
             `Estreou em ${fmtDia(primeira!)}. Não comprou SeaBox, mas não dá para saber se o plano dele já embute de cortesia — esse mapeamento não existe na API.`,
             `estreia em ${fmtDia(primeira!)}`),
