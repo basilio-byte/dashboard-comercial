@@ -73,6 +73,8 @@ export const PARAMS = {
 } as const;
 
 const h = (v: { toFixed: (n: number) => string }) => `${Number(v.toFixed(1))}h`.replace(".", ",");
+/** Decimal em pt-BR. Ponto no lugar de vírgula é a marca de número não formatado. */
+const num = (v: number) => v.toFixed(1).replace(".", ",");
 
 export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]> {
   const hoje = keyToUtcDate(todayKey());
@@ -269,10 +271,15 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
             "Mês anterior sem receita — não existe base de comparação. Não é queda de 100%.")
         : pct.disparou
           ? ativo("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-              `Caiu ${Math.abs(pct.variacaoPct).toFixed(1)}% de ${pen!.mesKey} para ${ult!.mesKey}. ⚠ Limiar de ${PARAMS.limiarQuedaPct}% é exemplo, não decisão do cliente.`,
-              `${pct.variacaoPct.toFixed(1)}%`)
+              `Caiu ${num(Math.abs(pct.variacaoPct))}% de ${pen!.mesKey} para ${ult!.mesKey}. ⚠ Limiar de ${PARAMS.limiarQuedaPct}% é exemplo, não decisão do cliente.`,
+              `${num(pct.variacaoPct)}%`)
           : sem("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-              `Variação de ${pct.variacaoPct.toFixed(1)}%, dentro do limiar de ${PARAMS.limiarQuedaPct}%.`),
+              // ⚠ Subir NÃO é "dentro do limiar de queda". A mensagem anterior
+              // dizia "variação de 77.4%, dentro do limiar de 30%" para um
+              // cliente que CRESCEU 77% — número certo, motivo mentiroso.
+              pct.variacaoPct > 0
+                ? `Subiu ${num(pct.variacaoPct)}% de ${pen!.mesKey} para ${ult!.mesKey} — não é queda.`
+                : `Caiu ${num(Math.abs(pct.variacaoPct))}%, dentro do limiar de ${PARAMS.limiarQuedaPct}%.`),
   );
 
   // ── SALDO_COTA · regras 2 e 9 ───────────────────────────────────────────
