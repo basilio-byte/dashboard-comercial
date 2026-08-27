@@ -347,3 +347,51 @@ const ambiguo = mk("AMBIGUO");
 function fmtDia(d: Date): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(d);
 }
+
+/**
+ * COMO CADA CATEGORIA DO CONEXA ESTÁ SENDO CLASSIFICADA.
+ *
+ * ⚠ Existe para tornar VISÍVEL uma falha que seria silenciosa. As regras 1, 6,
+ * 7, 8 e 10 dependem de casar o nome da categoria de serviço; se a Seahub
+ * renomear "Salas Privativas - Seaway Center", as três regras de marco de
+ * privativa simplesmente param de encontrar contrato — sem erro, sem alerta,
+ * sem nada na tela. Só uma fila que encolhe e ninguém sabe por quê.
+ *
+ * O projeto irmão em produção tem exatamente esse tipo de defeito registrado no
+ * ADR-0017 dele: DUAS grafias da mesma categoria convivendo (uma com espaço
+ * duplo), partindo a receita em duas no relatório que agrupa por string exata.
+ * Achado só quando alguém foi implementar outra coisa.
+ *
+ * Aqui o casamento é por substring, então espaço duplo não quebra. Mas renomear
+ * quebra — e é isso que esta lista deixa à vista.
+ */
+export interface CategoriaClassificada {
+  conexaId: number;
+  nome: string;
+  privativa: boolean;
+  fiscal: boolean;
+  seabox: boolean;
+  /** Quantos planos usam esta categoria. Zero = categoria sem uso. */
+  planos: number;
+}
+
+export async function classificacaoDeCategorias(): Promise<CategoriaClassificada[]> {
+  const [categorias, planos] = await Promise.all([
+    prisma.serviceCategory.findMany({ orderBy: { name: "asc" } }),
+    prisma.plan.groupBy({ by: ["serviceCategoryConexaId"], _count: true }),
+  ]);
+  const usoPor = new Map(
+    planos
+      .filter((p) => p.serviceCategoryConexaId !== null)
+      .map((p) => [p.serviceCategoryConexaId!, p._count]),
+  );
+
+  return categorias.map((c) => ({
+    conexaId: c.conexaId,
+    nome: c.name ?? `categoria ${c.conexaId}`,
+    privativa: ehSegmentoPrivativa(c.name),
+    fiscal: ehSegmentoFiscal(c.name),
+    seabox: ehSegmentoSeaBox(c.name),
+    planos: usoPor.get(c.conexaId) ?? 0,
+  }));
+}

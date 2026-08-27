@@ -2,6 +2,7 @@ import { CircleCheck, TriangleAlert, Ban, CircleDashed, type LucideIcon } from "
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { Cabecalho, Faixa, Nota, Secao } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
+import { CategoriasClassificadas } from "./categorias";
 
 export const dynamic = "force-dynamic";
 
@@ -299,6 +300,8 @@ export default async function Gatilhos() {
             })}
           </div>
         </Secao>
+
+        <CategoriasClassificadas />
 
         <Nota>
           As 12 linhas colapsam em <strong>6 famílias</strong> de código, não 12 arquivos — manter
