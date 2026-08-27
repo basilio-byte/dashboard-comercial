@@ -126,6 +126,33 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 
 ---
 
+## 🔴 A MEDIR — pode afetar o gatilho que JÁ ESTÁ RODANDO
+
+### Excedente de horas — compra de pacote conta como "pagou por fora"?
+
+Informado pelo dono em 2026-08-27: **"alguns planos têm cota de hora inclusa, mas os clientes
+podem comprar horas por fora também"**.
+
+O sinal de excedente conta como "horas pagas por fora do plano" toda reserva com
+`status: paid`. A pergunta que não está respondida no dado que temos:
+
+> Quando o cliente **compra um pacote de horas** e usa essas horas, a reserva volta como
+> `deductedFromQuota` (abatida do balde do pacote) ou como `paid` (faturada)?
+
+- Se `deductedFromQuota` → o sinal está correto como está.
+- Se `paid` → o número "horas pagas por fora" **mistura duas coisas economicamente diferentes**:
+  hora de penalidade por estouro e hora pré-comprada em pacote. A direção do sinal continua certa
+  (o cliente precisa de mais horas do que o plano dá), mas a MAGNITUDE fica inflada e a oferta
+  pode estar errada — quem já comprou pacote talvez precise de um pacote maior, não de upgrade
+  de plano.
+
+**Como medir, sem esperar resposta de ninguém:** para os clientes hoje na fila do Radar, cruzar
+`/sales` procurando venda de pacote de horas no mesmo ciclo. Se houver, comparar as horas
+`paid` com a quantidade comprada. É a mesma disciplina da Fase 0 — medir em vez de assumir.
+
+⚠ Até medir, **não mexer no gatilho**: ele é o único rodando, e trocá-lo por suposição é pior
+que conviver com uma magnitude possivelmente inflada que já vem rotulada.
+
 ## 🟡 Bloqueiam a Fase 4 — semântica de cada regra
 
 ### Regra 1 — Fiscal 11 meses
@@ -175,8 +202,17 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 41. O relógio começa em `startDate` ou em `dateSalesGeneration`? ⚠ **ASSUMIDO `startDate`**, por
     coerência com a resposta da regra 1 (mesma família `MARCO_CONTRATO`, mesmo campo). Não foi
     perguntado nestes termos — **confirmar**.
-42. **O SeaBox da regra 7 é cortesia ou venda?** Se é cortesia e não é registrada no Conexa, o
-    sistema **nunca saberá que o cliente já recebeu** e vai reofertar.
+42. ~~O SeaBox da regra 7 é cortesia ou venda?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono: AS
+    DUAS.** O SeaBox é um produto vendável, **e** alguns outros produtos o fornecem de cortesia
+    na assinatura. Logo "já tem" tem duas vias, com procedências diferentes:
+    - **compra** → sai de `/sales`, é fato da API;
+    - **cortesia** → **NÃO existe na API**. É cadastro: alguém precisa declarar quais produtos
+      embutem quais.
+    Implementado em `posseDoProduto` / `podeOfertar`. Enquanto o plano do cliente não estiver
+    mapeado, a resposta é `DESCONHECIDO` e **a regra não dispara** — o custo de silenciar uma
+    oferta legítima é menor que o de reofertar uma cortesia já recebida.
+    ⚠ **PENDENTE, e agora é cadastro, não pergunta:** quais planos/produtos embutem SeaBox?
+    Vale para as regras 5 e 7, que ofertam SeaBox.
 43. ~~"Até o 6º mês" é aniversário ou janela aberta?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono:
     ANIVERSÁRIO.** Dispara no marco dos 6 meses, com tolerância para o atraso do job — e não
     todo dia do 1º ao 6º mês. A diferença é entre uma oferta e cento e oitenta.

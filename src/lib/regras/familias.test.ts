@@ -8,6 +8,8 @@ import {
   primeiraReserva,
   quedaMesAMes,
   quedaPercentual,
+  podeOfertar,
+  posseDoProduto,
   usoAvulsoAlto,
 } from "./familias";
 
@@ -192,5 +194,44 @@ describe("classificação de segmento — regras 1, 6, 7, 8, 10", () => {
     expect(ehSegmentoPrivativa(null)).toBe(false);
     expect(ehSegmentoFiscal("Salas Privativas - Seaway Center")).toBe(false);
     expect(ehSegmentoFiscal(undefined)).toBe(false);
+  });
+});
+
+describe("supressão — não ofertar o que o cliente já tem", () => {
+  const SEABOX = 4242;
+
+  it("quem comprou não recebe oferta", () => {
+    expect(posseDoProduto({ produtoAlvo: SEABOX, comprados: [SEABOX], cortesiasDoPlano: [] })).toBe(
+      "POR_COMPRA",
+    );
+  });
+
+  it("⚠ quem recebeu de CORTESIA no plano também não recebe", () => {
+    // Informado pelo dono em 2026-08-27: alguns produtos fornecem o SeaBox
+    // embutido na assinatura, sem venda nenhuma para rastrear.
+    expect(
+      posseDoProduto({ produtoAlvo: SEABOX, comprados: [], cortesiasDoPlano: [SEABOX] }),
+    ).toBe("POR_CORTESIA");
+  });
+
+  it("⚠ plano NÃO mapeado é DESCONHECIDO, nunca 'não possui'", () => {
+    // A cortesia não existe na API — é cadastro. Sem o mapeamento, afirmar
+    // "não possui" seria inventar dado, e reofertaria a quem já recebeu.
+    expect(
+      posseDoProduto({ produtoAlvo: SEABOX, comprados: [], cortesiasDoPlano: null }),
+    ).toBe("DESCONHECIDO");
+  });
+
+  it("lista vazia é diferente de não mapeado", () => {
+    expect(posseDoProduto({ produtoAlvo: SEABOX, comprados: [], cortesiasDoPlano: [] })).toBe(
+      "NAO_POSSUI",
+    );
+  });
+
+  it("só 'não possui' libera a oferta", () => {
+    expect(podeOfertar("NAO_POSSUI")).toBe(true);
+    expect(podeOfertar("POR_COMPRA")).toBe(false);
+    expect(podeOfertar("POR_CORTESIA")).toBe(false);
+    expect(podeOfertar("DESCONHECIDO")).toBe(false);
   });
 });

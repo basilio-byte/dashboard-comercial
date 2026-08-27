@@ -251,3 +251,57 @@ export function ehSegmentoFiscal(nomeCategoria: string | null | undefined): bool
   const n = normalizar(nomeCategoria);
   return n.includes("endereco fiscal") || n.includes("fiscal");
 }
+
+// ---------------------------------------------------------------------------
+// SUPRESSÃO — "não ofertar o que o cliente já tem"
+// ---------------------------------------------------------------------------
+
+/**
+ * O cliente já tem o produto que a regra ia ofertar?
+ *
+ * ⚠ Esta é a pergunta que a especificação do Diego **nunca faz**. Ela diz
+ * quando ofertar, jamais quando NÃO ofertar — e é aí que uma automação
+ * queima a confiança do vendedor: ofertando ao cliente o que ele acabou de
+ * comprar.
+ *
+ * ⚠ **Duas vias de posse, informadas pelo dono em 2026-08-27:** o SeaBox é um
+ * produto vendável, *"mas alguns outros produtos fornecem o SeaBox como
+ * cortesia na assinatura"*. Então "já tem" não é só "comprou" — pode ter vindo
+ * embutido no plano, sem nenhuma venda para rastrear.
+ *
+ * As duas vias têm procedências diferentes, e isso importa:
+ *
+ * - **compra** → sai de `/sales`, é fato da API
+ * - **cortesia** → NÃO existe na API. É cadastro: alguém precisa declarar quais
+ *   produtos embutem quais. Enquanto o plano do cliente não estiver mapeado, a
+ *   resposta é `DESCONHECIDO` — nunca "não possui".
+ *
+ * `DESCONHECIDO` não deixa a regra disparar. É a mesma regra de ouro do resto
+ * do projeto: nada dispara sobre dado de procedência indisponível. O custo de
+ * silenciar uma oferta legítima é menor que o de reofertar uma cortesia que o
+ * cliente já recebeu.
+ */
+export type Posse = "POR_COMPRA" | "POR_CORTESIA" | "NAO_POSSUI" | "DESCONHECIDO";
+
+export function posseDoProduto(p: {
+  produtoAlvo: number;
+  /** `productId` já vendidos a este cliente. Vem de `/sales`. */
+  comprados: number[];
+  /**
+   * `productId` que o plano do cliente embute de cortesia.
+   *
+   * `null` = o plano ainda NÃO foi mapeado. Diferente de `[]`, que significa
+   * "mapeado, e não embute nada".
+   */
+  cortesiasDoPlano: number[] | null;
+}): Posse {
+  if (p.comprados.includes(p.produtoAlvo)) return "POR_COMPRA";
+  if (p.cortesiasDoPlano === null) return "DESCONHECIDO";
+  if (p.cortesiasDoPlano.includes(p.produtoAlvo)) return "POR_CORTESIA";
+  return "NAO_POSSUI";
+}
+
+/** Só `NAO_POSSUI` libera a oferta. Ambíguo e desconhecido seguram. */
+export function podeOfertar(posse: Posse): boolean {
+  return posse === "NAO_POSSUI";
+}
