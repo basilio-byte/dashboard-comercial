@@ -241,6 +241,23 @@ export function ehSegmentoPrivativa(nomeCategoria: string | null | undefined): b
 }
 
 /**
+ * A categoria é a do SeaBox?
+ *
+ * ⚠ Achado lendo o catálogo real do projeto irmão em 2026-08-27: **o SeaBox tem
+ * categoria de serviço PRÓPRIA** no Conexa, com cinco produtos (3156, 3157 na
+ * SEAHUB; 3178, 3179, 3182 na SEATECH).
+ *
+ * Isso muda a supressão das regras 5 e 7 de adivinhação para consulta: "o
+ * cliente já comprou SeaBox?" vira categoria do produto vendido, não casamento
+ * de nome. Continua faltando o outro lado — quais planos o embutem de cortesia
+ * —, que não existe na API e é cadastro.
+ */
+export function ehSegmentoSeaBox(nomeCategoria: string | null | undefined): boolean {
+  if (!nomeCategoria) return false;
+  return normalizar(nomeCategoria).includes("seabox");
+}
+
+/**
  * A categoria do plano é de Endereço Fiscal? Insumo das regras 1 e 10.
  *
  * ⚠ O TIER (Litoral / Batial / Abissal) **não** sai daqui — sai da cota do

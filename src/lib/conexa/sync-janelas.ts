@@ -384,10 +384,17 @@ export async function cargaHistorica(
 
     // HALTED quando o prazo cortou — é o freio funcionando, não falha. A tela
     // já explica que HALTED significa "continua de onde parou".
-    await fecharRun(runId, interrompida ? "HALTED" : "SUCCESS", {
-      lidos: registros,
-      gravados: registros,
-    });
+    // ⚠ Grava o que foi TOCADO, não só o total. É o que responde "quais janelas
+    // esta execução leu?" — pergunta sem resposta até agora, e justamente a que
+    // explica o backfill gastando requisição com a carga já completa.
+    // Compacto de propósito: uma linha por janela, não o objeto inteiro.
+    await fecharRun(
+      runId,
+      interrompida ? "HALTED" : "SUCCESS",
+      { lidos: registros, gravados: registros },
+      undefined,
+      { entidades: alvos, janelas: resumoDeJanelas(detalhe) },
+    );
 
     return {
       janelasConcluidas: concluidas,
@@ -478,7 +485,10 @@ export async function sincronizarIncremental(
       prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
     ]);
 
-    await fecharRun(runId, "SUCCESS", { lidos: registros, gravados: registros });
+    await fecharRun(runId, "SUCCESS", { lidos: registros, gravados: registros }, undefined, {
+      entidades: alvos,
+      janelas: resumoDeJanelas(detalhe),
+    });
 
     return {
       janelasConcluidas: concluidas,
@@ -527,6 +537,41 @@ const CONTADOR_LINHAS: Record<Entidade, () => Promise<number>> = {
 export function janelasDoPeriodo(fundo: string | null): Set<string> | null {
   if (!fundo) return null;
   return new Set(gerarJanelas(fundo, currentMonthKey()));
+}
+
+/**
+ * Cobertura do catálogo de produtos.
+ *
+ * ⚠ Achado lendo o projeto irmão em 2026-08-27 (ADR-0014 dele): **`/products`
+ * devolve 118 dos 164+ produtos que aparecem em vendas.** Os demais são
+ * salas/espaços e retornam `404 "does not exist or you have no permission"`.
+ *
+ * Nós carregamos produtos exatamente por `/products`, então o nosso catálogo
+ * tem o mesmo buraco — e nenhuma tela dizia isso. Toda regra que dependa de
+ * `productId` (a supressão, por exemplo) falha em silêncio nos produtos que
+ * faltam, que é a pior forma de falhar.
+ *
+ * Isto mede o buraco com o dado que já temos: quantos `productId` distintos
+ * aparecem em vendas e quantos deles existem no catálogo. Não custa API.
+ */
+export async function coberturaDeProdutos(): Promise<{
+  noCatalogo: number;
+  vendidos: number;
+  semCadastro: number;
+}> {
+  const [noCatalogo, distintos] = await Promise.all([
+    prisma.product.count(),
+    prisma.sale.findMany({
+      where: { productConexaId: { not: null } },
+      select: { productConexaId: true },
+      distinct: ["productConexaId"],
+    }),
+  ]);
+  const ids = distintos.map((s) => s.productConexaId!).filter((x) => x !== null);
+  const conhecidos = ids.length
+    ? await prisma.product.count({ where: { conexaId: { in: ids } } })
+    : 0;
+  return { noCatalogo, vendidos: ids.length, semCadastro: ids.length - conhecidos };
 }
 
 /**
@@ -603,4 +648,15 @@ export async function progressoDaCarga(): Promise<
     });
   }
   return saida;
+}
+
+/**
+ * Resumo compacto das janelas que uma execução tocou: `entidade:janela=STATUS(n)`.
+ *
+ * Uma linha por janela em vez do objeto inteiro — o `detail` é para diagnóstico,
+ * não para reprocessamento, e um JSON gordo por execução a cada 10 minutos
+ * encheria a tabela sem responder melhor.
+ */
+function resumoDeJanelas(detalhe: ResultadoJanela[]): string[] {
+  return detalhe.map((d) => `${d.entidade}:${d.janela}=${d.status}(${d.registros})`);
 }

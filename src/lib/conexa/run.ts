@@ -68,6 +68,17 @@ export async function fecharRun(
   status: "SUCCESS" | "FAILED" | "HALTED",
   totais: TotaisDoRun,
   erro?: string,
+  /**
+   * O que a execução TOCOU. `SyncRun.detail` existe no schema desde o começo e
+   * nunca foi preenchido — então "quais janelas este backfill leu?" não tinha
+   * resposta, e a única saída era adivinhar.
+   *
+   * Apareceu como problema concreto: com a carga completa, o backfill continua
+   * gastando requisições a cada ciclo, e sem o detalhe não dá para dizer se ele
+   * está revisitando algo, retentando uma janela que falha em silêncio, ou
+   * varrendo mês que não existe.
+   */
+  detalhe?: unknown,
 ): Promise<void> {
   await prisma.syncRun.update({
     where: { id: runId },
@@ -78,6 +89,7 @@ export async function fecharRun(
       recordsWrote: totais.gravados,
       requestsMade: requisicoesDoRun(runId),
       error: erro ?? null,
+      detail: detalhe === undefined ? undefined : (detalhe as never),
     },
   });
   inicioDeRequisicoes.delete(runId);

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getEnv, conexaConfigurado } from "@/lib/env";
 import { usuarioAtual } from "@/lib/auth/session";
-import { progressoDaCarga, pulsoDaCarga } from "@/lib/conexa/sync-janelas";
+import { coberturaDeProdutos, progressoDaCarga, pulsoDaCarga } from "@/lib/conexa/sync-janelas";
 import { dataHoraLocal } from "@/lib/dates";
 import { PainelOperacao } from "./painel";
 import { Pulso } from "./pulso";
@@ -15,10 +15,11 @@ export default async function Motor() {
   const usuario = await usuarioAtual();
   const admin = usuario?.role === "ADMIN";
 
-  const [runs, progresso, pulso, contagens] = await Promise.all([
+  const [runs, progresso, pulso, produtos, contagens] = await Promise.all([
     prisma.syncRun.findMany({ orderBy: { startedAt: "desc" }, take: 15 }),
     progressoDaCarga(),
     pulsoDaCarga(),
+    coberturaDeProdutos(),
     Promise.all([
       prisma.customer.count(),
       prisma.contract.count(),
@@ -59,12 +60,27 @@ export default async function Motor() {
           </Faixa>
         ) : null}
 
+        {produtos.semCadastro > 0 ? (
+          <Faixa tom="atencao">
+            <strong>
+              {produtos.semCadastro} produto(s) aparecem em vendas mas não estão no catálogo.
+            </strong>{" "}
+            A API do Conexa não devolve salas e espaços em{" "}
+            <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/products</code> —
+            ela responde 404 por permissão. Toda regra que depende de{" "}
+            <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">productId</code>{" "}
+            falha em silêncio nesses. Solução definitiva: o admin do Conexa liberar o token para
+            salas e espaços.
+          </Faixa>
+        ) : null}
+
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Contador rotulo="Clientes" n={clientes} />
           <Contador rotulo="Contratos" n={contratos} />
           <Contador rotulo="Cobranças" n={cobrancas} />
           <Contador rotulo="Vendas" n={vendas} />
           <Contador rotulo="Planos" n={planos} />
+          <Contador rotulo="Produtos" n={produtos.noCatalogo} />
         </section>
 
         <Secao

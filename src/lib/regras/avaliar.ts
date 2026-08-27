@@ -6,6 +6,7 @@ import { horasDoCliente } from "@/lib/intel/horas";
 import {
   ehSegmentoFiscal,
   ehSegmentoPrivativa,
+  ehSegmentoSeaBox,
   litoralReservouSala,
   marcoAtingido,
   posseDoProduto,
@@ -205,21 +206,60 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     dataDeCorte: keyToUtcDate(PARAMS.primeiraReservaDesde),
     toleranciaDias: PARAMS.toleranciaMarcoDias,
   });
-  // A oferta inclui SeaBox, e SeaBox pode vir de cortesia num plano — sem o
-  // mapeamento, "já tem?" não tem resposta. É `AMBIGUO`, não `ATIVO`.
-  const posseSeabox = posseDoProduto({ produtoAlvo: -1, comprados: compradas, cortesiasDoPlano: null });
+  /**
+   * O cliente já comprou SeaBox?
+   *
+   * ⚠ Duas vias, com procedências diferentes (ver `posseDoProduto`):
+   *
+   * - **compra** — agora RESPONDÍVEL. O catálogo real mostra que o SeaBox tem
+   *   categoria de serviço própria no Conexa, então basta olhar a categoria do
+   *   produto vendido. Antes eu passava um `produtoAlvo: -1` de mentira aqui,
+   *   e a resposta era sempre "desconhecido".
+   * - **cortesia** — segue sem resposta: quais planos embutem SeaBox não existe
+   *   na API, é cadastro.
+   *
+   * Então quem COMPROU recebe um veredicto definitivo (não ofertar); quem não
+   * comprou continua ambíguo, porque pode ter recebido de cortesia.
+   */
+  const produtosSeaBox = compradas.length
+    ? await prisma.product.findMany({
+        where: { conexaId: { in: compradas } },
+        select: { conexaId: true, serviceCategoryConexaId: true },
+      })
+    : [];
+  const catsDosComprados = [
+    ...new Set(produtosSeaBox.map((p) => p.serviceCategoryConexaId).filter((x): x is number => x !== null)),
+  ];
+  const catsSeaBox = catsDosComprados.length
+    ? await prisma.serviceCategory.findMany({
+        where: { conexaId: { in: catsDosComprados } },
+        select: { conexaId: true, name: true },
+      })
+    : [];
+  const idsCatSeaBox = new Set(
+    catsSeaBox.filter((c) => ehSegmentoSeaBox(c.name)).map((c) => c.conexaId),
+  );
+  const comprouSeaBox = produtosSeaBox.some(
+    (p) => p.serviceCategoryConexaId !== null && idsCatSeaBox.has(p.serviceCategoryConexaId),
+  );
+  const posseSeabox = comprouSeaBox
+    ? ("POR_COMPRA" as const)
+    : posseDoProduto({ produtoAlvo: -1, comprados: [], cortesiasDoPlano: null });
   sinais.push(
     !estreou
       ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
           primeira
             ? `Primeira reserva em ${fmtDia(primeira)} — fora da janela de estreia.`
             : "Cliente nunca reservou sala.")
-      : posseSeabox === "DESCONHECIDO"
-        ? ambiguo("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-            `Estreou em ${fmtDia(primeira!)}, mas não dá para saber se o plano dele já embute SeaBox de cortesia — o mapeamento não existe.`,
-            `estreia em ${fmtDia(primeira!)}`)
-        : ativo("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-            `Primeira reserva em ${fmtDia(primeira!)}.`, `estreia em ${fmtDia(primeira!)}`),
+      : // ⚠ Já comprou SeaBox → NÃO ofertar. É a supressão funcionando, e o
+        // estado certo é "não aplicável", não "ativo": a regra existe, mas esta
+        // oferta específica já foi atendida.
+        posseSeabox === "POR_COMPRA"
+        ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
+            `Estreou em ${fmtDia(primeira!)}, mas o cliente JÁ COMPROU SeaBox — não reofertar.`)
+        : ambiguo("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
+            `Estreou em ${fmtDia(primeira!)}. Não comprou SeaBox, mas não dá para saber se o plano dele já embute de cortesia — esse mapeamento não existe na API.`,
+            `estreia em ${fmtDia(primeira!)}`),
   );
 
   // ── EVENTO_EM_SEGMENTO · regra 10 ───────────────────────────────────────
