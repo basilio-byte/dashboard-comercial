@@ -175,3 +175,80 @@ export async function amostraDeValidacao(limite = 20): Promise<AmostraValidacao>
 
   return { linhas, bloqueio: null, analisados, comCota: contratos.length };
 }
+
+/**
+ * DE ONDE A COTA VEM, cru — para os casos em que ela não fecha.
+ *
+ * ⚠ Construído em vez de sair implementando `recurringSales` por hipótese.
+ *
+ * A pergunta aberta é por que o Conexa abateu MAIS horas do que a cota que
+ * conhecemos, em 4 de 20 linhas da amostra. Havia três explicações plausíveis, e
+ * a documentação da API derrubou a que eu ia perseguir:
+ *
+ * 1. pacote de horas comprado — mas `/products` **não declara horas** em campo
+ *    nenhum (só `name`, `price`, `categoryId`), então nem a API sabe quantas
+ *    horas um "Pacote de horas - 2h Mensais" concede;
+ * 2. `plan.hourQuotas` com `validityType` que NÃO é `Monthly` — e o nosso
+ *    conversor descarta essas linhas em silêncio. Um plano com
+ *    `[Monthly 2h, Weekly 1h]` vira 2h aqui e ~6h no ERP;
+ * 3. `contract.hourPlanQuota` divergindo do plano.
+ *
+ * As três são distinguíveis com o JSON que **já está no espelho**, sem gastar
+ * uma requisição. Então: medir primeiro.
+ */
+export interface CotaBruta {
+  origem: "plano" | "contrato";
+  nome: string | null;
+  quantity: number | null;
+  validityType: string | null;
+  spaceId: number | null;
+  groupId: number | null;
+  /** `false` = o nosso conversor DESCARTOU esta linha ao derivar a cota. */
+  contabilizada: boolean;
+}
+
+function lerCotas(raw: unknown, origem: "plano" | "contrato"): CotaBruta[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((q) => {
+    const o = (q ?? {}) as Record<string, unknown>;
+    const validityType = typeof o.validityType === "string" ? o.validityType : null;
+    const quantity = typeof o.quantity === "number" ? o.quantity : null;
+    return {
+      origem,
+      nome: typeof o.name === "string" ? o.name : null,
+      quantity,
+      validityType,
+      spaceId: typeof o.spaceId === "number" ? o.spaceId : null,
+      groupId: typeof o.groupId === "number" ? o.groupId : null,
+      // Espelha exatamente o filtro de `horasInclusasMensais`.
+      contabilizada: (validityType ?? "Monthly") === "Monthly" && quantity !== null,
+    };
+  });
+}
+
+/** Cotas cruas de um cliente, por contrato — só para diagnóstico. */
+export async function cotasBrutasDoCliente(customerConexaId: number): Promise<
+  Array<{ contratoConexaId: number; planoNome: string | null; cotas: CotaBruta[] }>
+> {
+  const contratos = await prisma.contract.findMany({
+    where: { customerConexaId, isActive: true },
+    select: { conexaId: true, planConexaId: true, hourPlanQuotaRaw: true },
+  });
+  const ids = contratos.map((c) => c.planConexaId).filter((x): x is number => x !== null);
+  const planos = ids.length
+    ? await prisma.plan.findMany({
+        where: { conexaId: { in: ids } },
+        select: { conexaId: true, name: true, hourQuotasRaw: true },
+      })
+    : [];
+  const planoPor = new Map(planos.map((p) => [p.conexaId, p]));
+
+  return contratos.map((c) => {
+    const p = c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined;
+    return {
+      contratoConexaId: c.conexaId,
+      planoNome: p?.name ?? null,
+      cotas: [...lerCotas(p?.hourQuotasRaw, "plano"), ...lerCotas(c.hourPlanQuotaRaw, "contrato")],
+    };
+  });
+}

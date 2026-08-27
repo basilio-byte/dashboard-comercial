@@ -43,20 +43,81 @@ export interface DefinicaoEntidade {
    * `createdAt` nunca muda: um registro jamais migra de janela. Já `dueDate` e
    * `startDate` podem ser editados no ERP — o registro **muda de janela** e uma
    * janela já concluída não o vê mais. Por isso as entidades mutáveis têm as
-   * janelas recentes reprocessadas periodicamente.
+   * janelas VIZINHAS reprocessadas.
+   *
+   * ⚠ Isto responde "o registro troca de janela?", e nada mais. Durante meses
+   * respondeu, por tabela, também a "o registro muda?" — e a resposta certa
+   * para a segunda pergunta é *sempre sim*. Ver `mesesDeRevisita`.
    */
   imutavel: boolean;
+  /**
+   * Quantos meses para trás revisitar por MUDANÇA DE CONTEÚDO.
+   *
+   * ⚠ Medido contra a API em 2026-08-27 — amostra de 100 registros criados no
+   * 1º semestre de 2024, comparando `createdAt` com `updatedAt`:
+   *
+   * | entidade        | alterados | p50 | p90  | máx  | além de 90d |
+   * |-----------------|-----------|-----|------|------|-------------|
+   * | `sales`         | 77%       | 28d | 120d | 356d | 22%         |
+   * | `room/bookings` | 53%       |  4d |  15d |  86d | 0%          |
+   * | `customers`     | —         |  —  |   —  |   —  | não expõe `updatedAt` |
+   *
+   * O que a medição derrubou: `sales` e `bookings` são `imutavel: true`, e isso
+   * fazia o incremental revisitar **só a janela corrente**. Uma venda criada em
+   * junho e cancelada em agosto nunca mais era lida — e mais de um quinto delas
+   * muda depois de 90 dias. O espelho ficava com o estado do dia da carga, para
+   * sempre, sem erro em lugar nenhum.
+   *
+   * Nenhuma rota aceita `updatedAtFrom` (verificado nas 43 rotas GET da coleção
+   * Postman), então não existe "me dê o que mudou". Só revarrer.
+   *
+   * ⚠ `customers` não devolve `updatedAt`: a deriva dele é **não observável**.
+   * O 6 abaixo é postura de risco, não medição — o cadastro carrega
+   * `isActive`/`isBlocked`, que é o portão de elegibilidade de toda regra, e
+   * errar ali oferta para cliente bloqueado. Anotado em `perguntas-abertas.md`.
+   */
+  mesesDeRevisita: number;
 }
 
 export const ENTIDADES: Record<Entidade, DefinicaoEntidade> = {
-  customers: { recurso: "customers", filtro: "createdAt", formato: "datetime", imutavel: true },
-  sales: { recurso: "sales", filtro: "createdAt", formato: "datetime", imutavel: true },
-  bookings: { recurso: "room/bookings", filtro: "createdAt", formato: "datetime", imutavel: true },
+  customers: {
+    recurso: "customers",
+    filtro: "createdAt",
+    formato: "datetime",
+    imutavel: true,
+    mesesDeRevisita: 6, // deriva não observável — ver a nota do campo
+  },
+  sales: {
+    recurso: "sales",
+    filtro: "createdAt",
+    formato: "datetime",
+    imutavel: true,
+    mesesDeRevisita: 12, // p90 de 120 dias, máximo medido de 356
+  },
+  bookings: {
+    recurso: "room/bookings",
+    filtro: "createdAt",
+    formato: "datetime",
+    imutavel: true,
+    mesesDeRevisita: 3, // p90 de 15 dias, ZERO alteração além de 90
+  },
   // ⚠ `/charges` NÃO tem filtro por criação — medido. Sobra o vencimento, que é
   // mutável: uma cobrança cuja data de vencimento muda migra de janela.
-  charges: { recurso: "charges", filtro: "dueDate", formato: "data", imutavel: false },
+  charges: {
+    recurso: "charges",
+    filtro: "dueDate",
+    formato: "data",
+    imutavel: false,
+    mesesDeRevisita: 3,
+  },
   // `/contracts` também não expõe criação; `startDate` é editável.
-  contracts: { recurso: "contracts", filtro: "startDate", formato: "data", imutavel: false },
+  contracts: {
+    recurso: "contracts",
+    filtro: "startDate",
+    formato: "data",
+    imutavel: false,
+    mesesDeRevisita: 3,
+  },
 };
 
 /**
@@ -128,17 +189,36 @@ export function gerarJanelas(inicio: string, fim: string): string[] {
 /**
  * Janelas a reprocessar num ciclo incremental.
  *
- * Para entidade IMUTÁVEL, basta a janela corrente (registro novo nasce nela).
- * Para entidade MUTÁVEL, também as anteriores: um vencimento editado move a
- * cobrança para outra janela, e a janela de destino precisa ser revisitada.
+ * Duas profundidades, porque as duas causas de desatualização têm prazos muito
+ * diferentes e custos muito diferentes:
+ *
+ * - **rasa** — o que corre a cada ciclo (30 min). Cobre registro NOVO (nasce na
+ *   janela corrente) e MIGRAÇÃO de janela (vencimento editado leva a cobrança
+ *   para outro mês; por isso as vizinhas, só para as entidades mutáveis).
+ *
+ * - **profunda** — o que corre uma vez por dia. Cobre MUDANÇA DE CONTEÚDO em
+ *   registro antigo: venda cancelada meses depois, reserva que virou `cancelled`,
+ *   cliente bloqueado. Vai até `mesesDeRevisita`, que é medido por entidade.
+ *
+ * ⚠ A profunda NÃO roda a cada 30 minutos de propósito. Revarrer 12 meses de
+ * `sales` custa centenas de requisições, e o dado que ela persegue muda com
+ * mediana de 28 dias — buscar de meia em meia hora seria gastar o teto de taxa
+ * para não descobrir nada. Frescura de meia hora para um fato que leva um mês
+ * para acontecer é desperdício, não segurança.
  */
 export function janelasIncrementais(
   entidade: Entidade,
   janelaAtual: string,
-  mesesParaTras = 3,
+  mesesParaTras?: number,
+  profundidade: "rasa" | "profunda" = "rasa",
 ): string[] {
   const def = ENTIDADES[entidade];
-  const n = def.imutavel ? 0 : mesesParaTras;
+  const n =
+    profundidade === "profunda"
+      ? (mesesParaTras ?? def.mesesDeRevisita)
+      : def.imutavel
+        ? 0
+        : (mesesParaTras ?? 3);
   const [ano, mes] = janelaAtual.split("-").map(Number);
   const out: string[] = [];
   for (let i = n; i >= 0; i--) {

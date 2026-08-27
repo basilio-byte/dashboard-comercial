@@ -159,3 +159,49 @@ describe("janela futura vs. período histórico", () => {
     expect(janelasIncrementais("contracts", atual).some((j) => !periodo.includes(j))).toBe(true);
   });
 });
+
+describe("janelasIncrementais — profundidade rasa vs. profunda", () => {
+  // ⚠ Estes testes prendem uma MEDIÇÃO, não uma preferência. Os números vêm de
+  // 100 registros amostrados da API em 2026-08-27 (ver a nota de
+  // `mesesDeRevisita`). Se alguém baixar `sales` para 3 meses "para economizar
+  // requisição", 22% das vendas voltam a congelar em silêncio — e o teste é o
+  // único lugar onde isso aparece antes de ir para produção.
+  it("rasa mantém o comportamento barato: entidade imutável só na janela corrente", () => {
+    expect(janelasIncrementais("sales", "2026-08")).toEqual(["2026-08"]);
+    expect(janelasIncrementais("bookings", "2026-08")).toEqual(["2026-08"]);
+  });
+
+  it("rasa revisita vizinhas nas mutáveis, porque o registro migra de janela", () => {
+    const j = janelasIncrementais("charges", "2026-08");
+    expect(j).toContain("2026-05");
+    expect(j).toContain("2026-09"); // vencimento também é empurrado para frente
+  });
+
+  it("profunda alcança a cauda medida de cada entidade", () => {
+    // sales: máximo medido de 356 dias entre criação e alteração.
+    const vendas = janelasIncrementais("sales", "2026-08", undefined, "profunda");
+    expect(vendas).toHaveLength(13); // 12 meses + a corrente
+    expect(vendas[0]).toBe("2025-08");
+
+    // bookings: zero alterações além de 90 dias — 3 meses bastam.
+    const reservas = janelasIncrementais("bookings", "2026-08", undefined, "profunda");
+    expect(reservas).toHaveLength(4);
+    expect(reservas[0]).toBe("2026-05");
+  });
+
+  it("profunda é mais funda que rasa em toda entidade imutável", () => {
+    for (const e of ["customers", "sales", "bookings"] as const) {
+      const rasa = janelasIncrementais(e, "2026-08");
+      const profunda = janelasIncrementais(e, "2026-08", undefined, "profunda");
+      expect(profunda.length, e).toBeGreaterThan(rasa.length);
+    }
+  });
+
+  it("toda entidade declara profundidade de revisita positiva", () => {
+    // Um zero aqui seria "nunca revisita" — o defeito que a medição encontrou,
+    // de volta por omissão.
+    for (const [nome, def] of Object.entries(ENTIDADES)) {
+      expect(def.mesesDeRevisita, nome).toBeGreaterThan(0);
+    }
+  });
+});

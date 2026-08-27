@@ -457,22 +457,41 @@ async function marcarFundo(entidade: Entidade, janela: string): Promise<void> {
  * janela, e a de destino precisa ser revisitada.
  */
 export async function sincronizarIncremental(
-  opts: { entidades?: Entidade[]; mesesParaTras?: number; signal?: AbortSignal } = {},
+  opts: {
+    entidades?: Entidade[];
+    mesesParaTras?: number;
+    signal?: AbortSignal;
+    /**
+     * `rasa` (default, a cada 30 min): janela corrente + vizinhas das mutáveis.
+     * `profunda` (uma vez por dia): até `mesesDeRevisita` de cada entidade, para
+     * capturar registro ANTIGO que mudou de conteúdo. Ver `janelasIncrementais`.
+     */
+    profundidade?: "rasa" | "profunda";
+  } = {},
 ): Promise<ResultadoCarga> {
   const alvos = opts.entidades ?? (Object.keys(ENTIDADES) as Entidade[]);
   const atual = currentMonthKey();
+  const profundidade = opts.profundidade ?? "rasa";
   const detalhe: ResultadoJanela[] = [];
   let registros = 0;
 
   // Também registra execução: é o que mantém o selo de frescura respondendo
   // "os dados são de agora?" em regime, quando a carga histórica já terminou e
   // só o incremental segue rodando.
-  const runId = await abrirRun("incremental", alvos.join(","));
+  const runId = await abrirRun(
+    profundidade === "profunda" ? "revisita" : "incremental",
+    alvos.join(","),
+  );
   const hb = iniciarHeartbeat(runId, () => ({ lidos: registros, gravados: registros }));
 
   try {
     for (const entidade of alvos) {
-      for (const janela of janelasIncrementais(entidade, atual, opts.mesesParaTras ?? 3)) {
+      for (const janela of janelasIncrementais(
+        entidade,
+        atual,
+        opts.mesesParaTras,
+        profundidade,
+      )) {
         if (opts.signal?.aborted) break;
         const r = await sincronizarJanela(entidade, janela, { signal: opts.signal });
         detalhe.push(r);

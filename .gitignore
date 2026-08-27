@@ -20,6 +20,10 @@ next-env.d.ts
 
 # Resultados das provas da Fase 0 (podem conter dados reais de clientes)
 docs/context/fase-0-resultado.md
+# Saídas das provas contra a API: contêm id e nome de cliente real.
+docs/context/prova-api-resultado.md
+docs/context/prova-consistencia-resultado.md
+docs/context/prova-horas-resultado.md
 scripts/.saida/
 
 # Testes e cobertura

@@ -108,6 +108,39 @@ function tarefas(): Tarefa[] {
       executar: () => sincronizarIncremental(),
     },
     {
+      /**
+       * Revarredura profunda — o que o incremental estruturalmente não vê.
+       *
+       * ⚠ O incremental relê a janela CORRENTE das entidades imutáveis. Isso
+       * cobre registro novo, e só. Medido contra a API em 2026-08-27: **77%**
+       * das vendas do 1º semestre de 2024 foram alteradas depois de criadas,
+       * com mediana de 28 dias e **22% além de 90 dias** — venda cancelada,
+       * reserva que virou `cancelled`, cliente bloqueado. Nada disso voltava
+       * para o espelho: a janela de criação já estava CONCLUÍDA e ninguém
+       * pedia de novo.
+       *
+       * Não dá para perguntar "o que mudou": nenhuma das 43 rotas GET da API
+       * aceita `updatedAtFrom`. Só revarrer.
+       *
+       * Diária, não de 30 em 30 minutos. O fato perseguido tem mediana de 28
+       * dias; buscá-lo a cada meia hora gastaria o teto de taxa (60 req/min,
+       * medido) para não achar nada — e ainda tiraria a vez da carga histórica,
+       * que compete pelo mesmo orçamento.
+       */
+      nome: "revarredura profunda",
+      intervaloMs: 24 * 60 * MINUTO,
+      ligada: () => env.SYNC_SCHEDULER === "on" && conexaConfigurado(),
+      executar: () =>
+        sincronizarIncremental({
+          profundidade: "profunda",
+          // Custo esperado ~450 requisições (~8 min a 60 req/min): 12 meses de
+          // `sales` são a maior parte. O prazo de 30 min é válvula, não alvo —
+          // existe para uma passada que travou não virar um run RUNNING eterno,
+          // não para cortar a varredura em regime.
+          signal: AbortSignal.timeout(30 * MINUTO),
+        }),
+    },
+    {
       // Roda sobre o espelho local: não consome requisição da API.
       nome: "consolidação da inteligência",
       intervaloMs: 30 * MINUTO,

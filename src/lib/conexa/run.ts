@@ -31,6 +31,17 @@ export type SyncMode =
   | "dimensions"
   | "backfill"
   | "incremental"
+  /**
+   * Revarredura profunda: relê janelas ANTIGAS atrás de registro que mudou de
+   * conteúdo depois de carregado (venda cancelada meses depois, reserva que
+   * virou `cancelled`, cliente bloqueado). Roda uma vez por dia.
+   *
+   * Modo separado do `incremental` por causa da tela: os dois leem as mesmas
+   * entidades, mas um custa dezenas de requisições e o outro centenas. Sem
+   * nome próprio, a passada diária apareceria como um `incremental` estranho e
+   * caro, e a primeira reação seria procurar defeito onde não há.
+   */
+  | "revisita"
   | "reconcile"
   | "intelligence";
 

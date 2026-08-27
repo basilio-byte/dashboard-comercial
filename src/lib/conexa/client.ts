@@ -153,7 +153,12 @@ export function respostas429(): { n: number; ultimo: string | null } {
 
 
 
-function buildUrl(path: string, query?: Query): string {
+/**
+ * Exportada para teste: a serializacao de query e onde a integracao quebra em
+ * silencio (array sem colchete devolve o conjunto errado; booleano devolve
+ * 400). Sao regras da API do Conexa, nao do TypeScript — so um teste as prende.
+ */
+export function buildUrl(path: string, query?: Query): string {
   const env = getEnv();
   const base = env.CONEXA_BASE_URL.replace(/\/$/, "");
   const url = new URL(`${base}/${path.replace(/^\//, "")}`);
@@ -170,6 +175,20 @@ function buildUrl(path: string, query?: Query): string {
       } else if (value.length) {
         url.searchParams.set(key, value.join(","));
       }
+    } else if (typeof value === "boolean") {
+      // ⚠ A Conexa NÃO aceita `true`/`false` — responde 400 com
+      // `"Is Active must be either 1 or 0"`. Medido em 2026-08-27 contra
+      // `/plans?isActive=true` e `/recurringSales?isActive=true`.
+      //
+      // Sem esta linha, `String(true)` produzia `isActive=true` e a requisição
+      // morria de vez: o retry só cobre 429 e 5xx, então 400 sobe direto como
+      // `ConexaError`. Falha alta, ao menos — mas só na hora de rodar. A
+      // conversão fica AQUI, no único ponto por onde toda query passa, em vez
+      // de virar disciplina de quem escreve cada chamada.
+      //
+      // `boolean` já estava em `QueryValue`: o tipo convidava ao erro que a API
+      // recusa. Agora o convite é válido.
+      url.searchParams.set(key, value ? "1" : "0");
     } else {
       url.searchParams.set(key, String(value));
     }
