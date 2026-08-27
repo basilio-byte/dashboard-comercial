@@ -256,6 +256,7 @@ describe("sinal de excedente recorrente", () => {
     // cota esgotada E faturado por cima — a regra corrigida
     estourou: concedido !== null && concedido > 0 && abatido >= concedido && faturado > 0,
     conclusivo: true,
+    cotaInconsistente: false,
     reservas: 1,
   });
 
@@ -291,5 +292,68 @@ describe("sinal de excedente recorrente", () => {
   it("uso acima de 100% aparece como tal — é o sinal de venda", () => {
     const s = avaliarExcedente([c(3, 5, 5)]); // consumiu 8 de cota 5
     expect(s.usoMedioPct).toBe(160);
+  });
+});
+
+/**
+ * A cota que conhecemos pode estar MENOR que a real — e quando está, o sistema
+ * não pode transformar o próprio erro em sinal de venda.
+ *
+ * Observado em produção em 2026-08-27: 4 de 20 linhas da amostra com saldo
+ * derivado negativo, porque a concessão saía de `plan.hourQuotas` ignorando
+ * `contract.hourPlanQuota`.
+ */
+describe("cota inconsistente — abatido acima do concedido", () => {
+  const janela = { inicio: d("2026-08-01"), fimExclusivo: d("2026-09-01"), rotulo: "ago" };
+
+  it("marca a inconsistência quando o Conexa abateu mais que a cota", () => {
+    // Caso real: #1172 HOMEOFORMULA — cota 2h, abatido 4h.
+    const c = consolidarCiclo(
+      janela,
+      [{ status: "deductedFromQuota", horas: 4, dataLocal: d("2026-08-10") }],
+      money(2),
+    );
+    expect(c.cotaInconsistente).toBe(true);
+    // O saldo negativo continua calculado, para a tela poder DECLARÁ-LO.
+    expect(Number(c.saldo)).toBe(-2);
+  });
+
+  it("⚠ ciclo com cota inconsistente NÃO confirma estouro", () => {
+    // Sem esta trava, a cota subestimada torna `abatido >= concedido`
+    // trivialmente verdadeiro e `estourou` vira só "existe hora faturada" —
+    // exatamente o bug que a regra atual foi escrita para não ter.
+    const c = consolidarCiclo(
+      janela,
+      [
+        { status: "deductedFromQuota", horas: 4, dataLocal: d("2026-08-10") },
+        { status: "paid", horas: 3, dataLocal: d("2026-08-12") },
+      ],
+      money(2),
+    );
+    expect(c.cotaInconsistente).toBe(true);
+    expect(c.estourou).toBe(false);
+  });
+
+  it("cota exatamente esgotada NÃO é inconsistente — é o estouro legítimo", () => {
+    const c = consolidarCiclo(
+      janela,
+      [
+        { status: "deductedFromQuota", horas: 6, dataLocal: d("2026-08-10") },
+        { status: "paid", horas: 15, dataLocal: d("2026-08-12") },
+      ],
+      money(6),
+    );
+    expect(c.cotaInconsistente).toBe(false);
+    expect(c.estourou).toBe(true);
+  });
+
+  it("plano sem cota nunca é inconsistente — não há balde para estourar", () => {
+    const c = consolidarCiclo(
+      janela,
+      [{ status: "paid", horas: 9, dataLocal: d("2026-08-10") }],
+      null,
+    );
+    expect(c.cotaInconsistente).toBe(false);
+    expect(c.estourou).toBe(false);
   });
 });

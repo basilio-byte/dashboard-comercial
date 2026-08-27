@@ -65,7 +65,8 @@ export async function SecaoValidacao() {
             }
             rodape={
               <>
-                <Procedencia tipo="API" detalhe="plan.hourQuotas" /> cota ·{" "}
+                <Procedencia tipo="API" detalhe="contract.hourPlanQuota, com plan.hourQuotas de reserva" />{" "}
+                cota (<span className="text-[var(--tinta-3)]">ᴾ</span> = veio do plano) ·{" "}
                 <Procedencia tipo="API" detalhe="booking.status = deductedFromQuota" /> abatido ·{" "}
                 <Procedencia tipo="DERIVADO" detalhe="cota − abatido" /> saldo. Linha marcada como{" "}
                 <strong>não conclusiva</strong> tem reserva que não pudemos classificar e{" "}
@@ -99,15 +100,48 @@ export async function SecaoValidacao() {
                       <td className="num whitespace-nowrap text-[var(--tinta-2)]">
                         {l.cicloInicio} a {l.cicloFim}
                       </td>
-                      <td className="num text-right">{l.concedido}h</td>
+                      <td className="num text-right">
+                        {l.concedido}h
+                        {/* A procedência da cota é o que separa "o cliente
+                            estourou" de "nós lemos o balde errado". */}
+                        {l.origemDaCota === "plano" ? (
+                          <span
+                            className="ml-1 text-[var(--tinta-3)]"
+                            title="Cota do PLANO — o contrato não declara cota própria"
+                          >
+                            ᴾ
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="num text-right text-[var(--tinta-3)]">{l.reservasNoCiclo}</td>
                       <td className="num text-right">{l.abatido}h</td>
                       <td className="num text-right">{l.faturado}h</td>
                       <td className="num text-right font-semibold">
-                        {l.saldoDerivado === null ? "—" : `${l.saldoDerivado}h`}
+                        {/* ⚠ Saldo negativo NÃO é um número — é uma contradição.
+                            Imprimi-lo como fato foi o que escondeu, por semanas,
+                            que a concessão saía do plano e não do contrato. */}
+                        {l.cotaInconsistente ? (
+                          <span
+                            className="text-[var(--critico-tinta)]"
+                            title="A cota conhecida é menor que o que o Conexa abateu — o saldo não pode ser calculado"
+                          >
+                            impossível
+                          </span>
+                        ) : l.saldoDerivado === null ? (
+                          "—"
+                        ) : (
+                          `${l.saldoDerivado}h`
+                        )}
                       </td>
                       <td>
-                        {!l.conclusivo ? (
+                        {l.cotaInconsistente ? (
+                          <span
+                            className="selo selo-critico"
+                            title="abatido > concedido. A concessão que conhecemos está errada, não o cliente."
+                          >
+                            cota inconsistente
+                          </span>
+                        ) : !l.conclusivo ? (
                           <span
                             className="selo selo-atencao"
                             title={`${l.naoClassificado}h não classificadas`}

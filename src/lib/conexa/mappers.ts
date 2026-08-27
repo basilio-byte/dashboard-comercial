@@ -67,6 +67,26 @@ export function horasInclusasMensais(
   return mensais.reduce((acc, q) => acc.plus(new Prisma.Decimal(String(q.quantity))), new Prisma.Decimal(0));
 }
 
+/**
+ * Cota mensal a partir do JSON cru de `contract.hourPlanQuota`.
+ *
+ * ⚠ Este campo era **gravado e nunca lido**. A concessão de horas saía só de
+ * `plan.hourQuotas` — o padrão do PLANO —, ignorando a cota do CONTRATO, que é
+ * a que vale para aquele cliente.
+ *
+ * O sintoma apareceu em produção em 2026-08-27: 4 de 20 linhas da amostra de
+ * validação com `abatido > concedido`, ou seja, saldo derivado NEGATIVO. O
+ * Conexa não deduz 7h de um balde de 6h; o balde é que era maior do que
+ * estávamos lendo.
+ *
+ * Custo de corrigir: zero requisição. O JSON já está no espelho, em
+ * `hourPlanQuotaRaw`, desde a primeira carga.
+ */
+export function cotaMensalDoContratoRaw(raw: unknown): Prisma.Decimal | null {
+  if (!Array.isArray(raw)) return null;
+  return horasInclusasMensais(raw as ConexaHourQuota[]);
+}
+
 export function mapCompany(c: ConexaCompany) {
   const id = c.companyId ?? c.id;
   if (!id) return null;

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { keyToUtcDate, nowInAppTz, todayKey } from "@/lib/dates";
 import { estadoDoEspelho } from "./completude";
 import { money, type Money } from "@/lib/money";
+import { cotaMensalDoContratoRaw } from "@/lib/conexa/mappers";
 import {
   avaliarExcedente,
   cicloVigente,
@@ -43,8 +44,10 @@ import {
 export interface HorasDoContrato {
   contratoConexaId: number;
   planoNome: string | null;
-  /** Cota mensal do plano. `null` = plano SEM cota (Litoral), ≠ zero. */
+  /** Cota mensal do ciclo. `null` = sem cota (Litoral), que NÃO é zero. */
   concedido: Money | null;
+  /** De onde a cota veio: o contrato manda, o plano é o padrão. */
+  origemDaCota: OrigemDaCota;
   inicio: Date;
   cicloAtual: ConsumoDoCiclo | null;
   fechados: ConsumoDoCiclo[];
@@ -68,6 +71,35 @@ export interface HorasDoCliente {
 }
 
 const CICLOS_ANALISADOS = 3;
+
+/**
+ * A concessão de horas do contrato, com procedência.
+ *
+ * ⚠ **O contrato manda, o plano é o padrão.** `plan.hourQuotas` é a cota do
+ * PRODUTO; `contract.hourPlanQuota` é a cota daquele CLIENTE naquele contrato —
+ * e é ela que o Conexa usa para decidir o que abate.
+ *
+ * A segunda estava sendo gravada (`hourPlanQuotaRaw`) e **nunca lida**. O
+ * sintoma apareceu na tela de validação em produção, 2026-08-27: 4 de 20 linhas
+ * com `abatido > concedido`, ou seja, saldo derivado NEGATIVO. O ERP não deduz
+ * 7h de um balde de 6h — o balde é que era maior do que estávamos lendo.
+ *
+ * Corrigir não custou requisição nenhuma: o JSON já está no espelho desde a
+ * primeira carga.
+ */
+export type OrigemDaCota = "contrato" | "plano" | null;
+
+function concessaoDoContrato(
+  contrato: { hourPlanQuotaRaw?: unknown },
+  plano: { horasInclusasMes?: { toString(): string } | null } | undefined,
+): { concedido: Money | null; origem: OrigemDaCota } {
+  const doContrato = cotaMensalDoContratoRaw(contrato.hourPlanQuotaRaw);
+  if (doContrato !== null) return { concedido: money(doContrato.toString()), origem: "contrato" };
+  if (plano?.horasInclusasMes != null) {
+    return { concedido: money(plano.horasInclusasMes.toString()), origem: "plano" };
+  }
+  return { concedido: null, origem: null };
+}
 
 export async function horasDoCliente(
   customerConexaId: number,
@@ -111,7 +143,7 @@ export async function horasDoCliente(
 
   const comCota = contratos.filter((c) => {
     const p = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
-    return p?.horasInclusasMes != null;
+    return concessaoDoContrato(c, p).concedido !== null;
   });
 
   // Uma consulta de reservas cobrindo TODAS as janelas de todos os contratos.
@@ -146,14 +178,14 @@ export async function horasDoCliente(
   const blocos: HorasDoContrato[] = [];
   for (const c of contratos) {
     const plano = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
-    const concedido =
-      plano?.horasInclusasMes != null ? money(plano.horasInclusasMes.toString()) : null;
+    const { concedido, origem: origemDaCota } = concessaoDoContrato(c, plano);
 
     if (!c.startDate) {
       blocos.push({
         contratoConexaId: c.conexaId,
         planoNome: plano?.name ?? null,
         concedido,
+        origemDaCota,
         inicio: refDia,
         cicloAtual: null,
         fechados: [],
@@ -170,6 +202,7 @@ export async function horasDoCliente(
       contratoConexaId: c.conexaId,
       planoNome: plano?.name ?? null,
       concedido,
+      origemDaCota,
       inicio: c.startDate,
       cicloAtual: vigente ? consolidarCiclo(vigente, paraConsumo, concedido) : null,
       fechados,
@@ -335,7 +368,7 @@ export async function clientesComExcedente(
 
     const comCota = lista.filter((c) => {
       const p = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
-      return p?.horasInclusasMes != null;
+      return concessaoDoContrato(c, p).concedido !== null;
     });
     // Ambíguo com mais de um contrato COM cota: a reserva não diz de qual balde
     // a hora saiu, e inventar atribuição é pior que ficar de fora.
@@ -347,8 +380,7 @@ export async function clientesComExcedente(
     const blocos: HorasDoContrato[] = [];
     for (const c of lista) {
       const plano = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
-      const concedido =
-        plano?.horasInclusasMes != null ? money(plano.horasInclusasMes.toString()) : null;
+      const { concedido, origem: origemDaCota } = concessaoDoContrato(c, plano);
       if (!c.startDate) continue;
 
       const fechados = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS).map((j) =>
@@ -359,6 +391,7 @@ export async function clientesComExcedente(
         contratoConexaId: c.conexaId,
         planoNome: plano?.name ?? null,
         concedido,
+        origemDaCota,
         inicio: c.startDate,
         cicloAtual: vigente ? consolidarCiclo(vigente, doCliente, concedido) : null,
         fechados,

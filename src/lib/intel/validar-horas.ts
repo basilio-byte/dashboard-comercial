@@ -48,6 +48,16 @@ export interface LinhaValidacao {
   /** Reservas que não pudemos classificar — se > 0, a linha não é conclusiva. */
   naoClassificado: string;
   conclusivo: boolean;
+  /**
+   * ⚠ O Conexa abateu MAIS horas do que a cota que conhecemos.
+   *
+   * `abatido > concedido` é impossível se a concessão estiver certa. Quando
+   * acontece, o problema é NOSSO — e a linha não serve para aprovar nem
+   * reprovar o cálculo, igual à não conclusiva.
+   */
+  cotaInconsistente: boolean;
+  /** De onde saiu a cota: `contrato` (a que vale) ou `plano` (o padrão). */
+  origemDaCota: "contrato" | "plano" | null;
   /** Mais de um contrato com cota: a atribuição por contrato é ambígua. */
   ambiguo: boolean;
   reservasNoCiclo: number;
@@ -149,6 +159,8 @@ export async function amostraDeValidacao(limite = 20): Promise<AmostraValidacao>
         faturado: fmt(ciclo.faturado),
         naoClassificado: fmt(ciclo.naoFaturado.plus(ciclo.horasDesconhecidas)),
         conclusivo: ciclo.conclusivo,
+        cotaInconsistente: ciclo.cotaInconsistente,
+        origemDaCota: c.origemDaCota,
         ambiguo: h.atribuicaoAmbigua,
         reservasNoCiclo: ciclo.reservas,
       };

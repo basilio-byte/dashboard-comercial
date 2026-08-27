@@ -200,6 +200,23 @@ export interface ConsumoDoCiclo {
    * conclusivo **não produz sinal** — ver `avaliarExcedente`.
    */
   conclusivo: boolean;
+  /**
+   * ⚠ A COTA que conhecemos é MENOR que o que o Conexa abateu dela.
+   *
+   * `abatido > concedido` é aritmeticamente impossível: o ERP não deduz 7h de
+   * um balde de 6h. Quando acontece, a conclusão certa não é "o cliente
+   * estourou muito" — é **a nossa concessão está errada**.
+   *
+   * Observado em produção em 2026-08-27: 4 de 20 linhas da amostra de validação
+   * com saldo derivado NEGATIVO. Saldo negativo não é um número, é uma
+   * contradição — e imprimi-la como fato é o oposto do que este projeto faz.
+   *
+   * Ciclo assim NÃO confirma estouro, pela mesma lógica de `conclusivo`:
+   * `estourou` depende de `abatido >= concedido`, que é exatamente a comparação
+   * sob suspeita. Confirmar sobre ela seria deixar um erro de cadastro nosso
+   * virar sinal de venda.
+   */
+  cotaInconsistente: boolean;
   reservas: number;
 }
 
@@ -258,6 +275,8 @@ export function consolidarCiclo(
   const temCota = concedido !== null && !concedido.isZero();
   const saldo = concedido === null ? null : concedido.minus(abatido);
   const conclusivo = !temBuraco && horasDesconhecidas.isZero();
+  // Ver a nota do campo: abatido acima da cota denuncia a NOSSA concessão.
+  const cotaInconsistente = temCota && abatido.greaterThan(concedido!);
 
   return {
     ciclo,
@@ -283,8 +302,13 @@ export function consolidarCiclo(
      *
      * Conservador na direção certa: sem a cota esgotada, não houve estouro.
      */
-    estourou: temCota && abatido.greaterThanOrEqualTo(concedido!) && faturado.greaterThan(0),
+    estourou:
+      temCota &&
+      !cotaInconsistente &&
+      abatido.greaterThanOrEqualTo(concedido!) &&
+      faturado.greaterThan(0),
     conclusivo,
+    cotaInconsistente,
     reservas: doCiclo.length,
   };
 }
