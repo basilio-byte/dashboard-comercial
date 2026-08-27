@@ -198,3 +198,56 @@ export function litoralReservouSala(p: {
 }): boolean {
   return p.temPlanoFiscalSemCota && p.reservasNoPeriodo > 0;
 }
+
+// ---------------------------------------------------------------------------
+// Classificação de segmento — insumo das regras 1, 6, 7, 8 e 10
+// ---------------------------------------------------------------------------
+
+/**
+ * Normaliza para comparar: minúsculas, sem acento, sem espaço sobrando.
+ *
+ * O catálogo tem grafias divergentes para a mesma coisa — a Fase 0 achou
+ * "Endereço Fiscal de Comércio" e "Endereço Fiscal De Comercio" convivendo.
+ */
+function normalizar(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * A CATEGORIA do plano é de sala privativa?
+ *
+ * ⚠ Decidido pelo dono em 2026-08-27: **classificar pela CATEGORIA do plano, e
+ * a estação de coworking CONTA**. A dúvida era concreta — a categoria "Salas
+ * Privativas - Seaway Center" inclui "Estação 01 - Coworking L21", que não é
+ * uma sala. A resposta é que a categoria inteira vale.
+ *
+ * ⚠ Isto NÃO é o "chute por nome de produto" que o projeto proíbe. A diferença
+ * importa: inferir pelo nome do PRODUTO é adivinhar ("Panteão" é qual
+ * segmento?); ler o nome da CATEGORIA DE SERVIÇO é usar o campo que a API
+ * expõe exatamente para classificar — `contrato → plano → serviceCategory`, que
+ * é a fórmula do próprio `docs/context/regras-comerciais.md`.
+ *
+ * Ainda assim, casar por substring envelhece: se a Seahub renomear a categoria,
+ * as regras 6, 7 e 8 silenciam. Por isso a tela Gatilhos mostra quais
+ * categorias foram classificadas, para a falha ser visível em vez de silenciosa.
+ */
+export function ehSegmentoPrivativa(nomeCategoria: string | null | undefined): boolean {
+  if (!nomeCategoria) return false;
+  return normalizar(nomeCategoria).includes("privativ");
+}
+
+/**
+ * A categoria do plano é de Endereço Fiscal? Insumo das regras 1 e 10.
+ *
+ * ⚠ O TIER (Litoral / Batial / Abissal) **não** sai daqui — sai da cota do
+ * plano, medido na Fase 0. Esta função responde só "é Fiscal?".
+ */
+export function ehSegmentoFiscal(nomeCategoria: string | null | undefined): boolean {
+  if (!nomeCategoria) return false;
+  const n = normalizar(nomeCategoria);
+  return n.includes("endereco fiscal") || n.includes("fiscal");
+}

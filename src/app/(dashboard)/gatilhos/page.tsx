@@ -98,8 +98,8 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "1 mês do início do contrato de sala privativa",
       oferta: "Registro de Marca",
       familia: "MARCO_CONTRATO",
-      estado: "ressalva",
-      nota: '⚠ falta decidir como identificar "sala privativa": a categoria "Salas Privativas - Seaway Center" inclui "Estação 01 - Coworking L21" — a estação de coworking conta?',
+      estado: "viavel",
+      nota: 'decidido em 2026-08-27: identifica pela CATEGORIA do plano, e a estação de coworking CONTA — a categoria "Salas Privativas - Seaway Center" vale inteira · âncora startDate, por coerência com a regra 1',
     },
     {
       n: "7",
@@ -108,7 +108,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       oferta: "SeaBox como benefício",
       familia: "MARCO_CONTRATO",
       estado: "ressalva",
-      nota: "mesma dúvida de identificação da regra 6 · ⚠ e o SeaBox é cortesia: se não vira venda no Conexa, o sistema nunca saberá que o cliente já recebeu e vai reofertar",
+      nota: "identificação resolvida junto com a regra 6 · ⚠ resta o SeaBox: é cortesia, e se não vira venda no Conexa o sistema nunca saberá que o cliente já recebeu — vai reofertar. Ou passa a ser registrado, ou a regra vira disparo único por cliente",
     },
     {
       n: "8",
@@ -116,8 +116,8 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "aniversário de 6 meses do contrato",
       oferta: "Panteão",
       familia: "MARCO_CONTRATO",
-      estado: "ressalva",
-      nota: "decidido em 2026-08-27: ANIVERSÁRIO, não janela aberta — a diferença é entre uma oferta e cento e oitenta · produto confirmado na Fase 0 (3380/3381) · mesma dúvida de identificação da regra 6",
+      estado: "viavel",
+      nota: "decidido em 2026-08-27: ANIVERSÁRIO, não janela aberta — a diferença é entre uma oferta e cento e oitenta · identificação pela categoria, com a estação contando · produto confirmado na Fase 0 (3380/3381)",
     },
     {
       n: "2",

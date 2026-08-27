@@ -167,10 +167,14 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 
 ### Regras 6, 7, 8 — sala privativa
 
-40. Identificar "sala privativa" por `privateSpaceId` ou pela categoria do plano? **A estação de
-    coworking conta?** (a categoria "Salas Privativas - Seaway Center" inclui "Estação 01 -
-    Coworking L21")
-41. O relógio começa em `startDate` ou em `dateSalesGeneration`?
+40. ~~Identificar "sala privativa" por `privateSpaceId` ou pela categoria do plano? A estação de
+    coworking conta?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono: pela CATEGORIA do plano, e a
+    estação de coworking CONTA.** A categoria inteira "Salas Privativas - Seaway Center" é
+    privativa, incluindo "Estação 01 - Coworking L21". Implementado em
+    `src/lib/regras/familias.ts` → `ehSegmentoPrivativa`.
+41. O relógio começa em `startDate` ou em `dateSalesGeneration`? ⚠ **ASSUMIDO `startDate`**, por
+    coerência com a resposta da regra 1 (mesma família `MARCO_CONTRATO`, mesmo campo). Não foi
+    perguntado nestes termos — **confirmar**.
 42. **O SeaBox da regra 7 é cortesia ou venda?** Se é cortesia e não é registrada no Conexa, o
     sistema **nunca saberá que o cliente já recebeu** e vai reofertar.
 43. ~~"Até o 6º mês" é aniversário ou janela aberta?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono:

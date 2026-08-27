@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { money } from "@/lib/money";
 import {
+  ehSegmentoFiscal,
+  ehSegmentoPrivativa,
   litoralReservouSala,
   marcoAtingido,
   primeiraReserva,
@@ -167,5 +169,28 @@ describe("EVENTO_EM_SEGMENTO — regra 10", () => {
   it("⚠ Batial tem 2h de cota — não é Litoral, não dispara", () => {
     // O tier vem da cota do plano, não do nome. Medido na Fase 0.
     expect(litoralReservouSala({ temPlanoFiscalSemCota: false, reservasNoPeriodo: 5 })).toBe(false);
+  });
+});
+
+describe("classificação de segmento — regras 1, 6, 7, 8, 10", () => {
+  it("⚠ a estação de coworking CONTA como privativa", () => {
+    // Decidido pelo dono em 2026-08-27. Era a dúvida que travava as regras
+    // 6, 7 e 8: a categoria inclui algo que não é uma sala.
+    expect(ehSegmentoPrivativa("Salas Privativas - Seaway Center")).toBe(true);
+    expect(ehSegmentoPrivativa("Salas Privativas")).toBe(true);
+  });
+
+  it("tolera grafia sem acento e caixa trocada", () => {
+    // O catálogo real tem "Endereço Fiscal de Comércio" e "De Comercio".
+    expect(ehSegmentoPrivativa("SALA PRIVATIVA")).toBe(true);
+    expect(ehSegmentoFiscal("Endereco Fiscal De Comercio")).toBe(true);
+    expect(ehSegmentoFiscal("Endereço Fiscal de Comércio")).toBe(true);
+  });
+
+  it("não classifica o que não é", () => {
+    expect(ehSegmentoPrivativa("Endereço Fiscal Litoral")).toBe(false);
+    expect(ehSegmentoPrivativa(null)).toBe(false);
+    expect(ehSegmentoFiscal("Salas Privativas - Seaway Center")).toBe(false);
+    expect(ehSegmentoFiscal(undefined)).toBe(false);
   });
 });
