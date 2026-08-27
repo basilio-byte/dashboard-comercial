@@ -27,12 +27,17 @@ export function AvisoCompletude({ estado }: { estado: EstadoEspelho }) {
           sem faturamento&quot;.
         </p>
       ) : null}
+      {/* ⚠ Não manda ninguém "continuar a carga". Ela é automática — o
+          agendador embutido roda sozinho —, e o botão que este texto sugeria é
+          restrito a administrador: a maioria de quem lê o aviso não pode agir
+          sobre ele. Instrução impossível de cumprir treina a pessoa a ignorar o
+          aviso inteiro. */}
       <p className="mt-1.5 text-[13.5px] text-[var(--tinta-3)]">
-        Continue a carga em{" "}
+        A carga roda sozinha e retoma de onde parou. Acompanhe em{" "}
         <Link href="/motor" className="font-medium text-[var(--acento-tinta)] hover:underline">
           Motor
-        </Link>{" "}
-        — ela retoma de onde parou, não recomeça.
+        </Link>
+        .
       </p>
     </Faixa>
   );

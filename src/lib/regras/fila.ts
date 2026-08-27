@@ -63,8 +63,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
   const espelho = await estadoDoEspelho();
 
   const bloqueadas: Array<{ regra: string; motivo: string }> = [
-    { regra: "2", motivo: "saldo derivado não conferido contra o Conexa" },
-    { regra: "9", motivo: "saldo derivado não conferido contra o Conexa" },
+    // ⚠ Permissão, não conferência — ver a nota em `avaliar.ts`.
+    { regra: "2", motivo: "`/packages` responde 404: as horas do pacote não são legíveis" },
+    { regra: "9", motivo: "`/packages` responde 404: as horas do pacote não são legíveis" },
   ];
   if (!espelho.horasConfiavel) {
     bloqueadas.push({ regra: "4", motivo: "espelho de reservas/contratos incompleto" });

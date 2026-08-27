@@ -20,7 +20,14 @@ import { corVariacao, pct } from "@/lib/ui";
  * terços daquela tela competia com a fila. Aqui, dentro da Carteira, receita é
  * o que sempre foi: um atributo do cliente. Ver a memória de identidade própria.
  */
-export async function MetricasDaCarteira({ confiavel }: { confiavel: boolean }) {
+export async function MetricasDaCarteira({
+  confiavel,
+  barram,
+}: {
+  confiavel: boolean;
+  /** Quais entidades barram a receita — para o aviso nomear a culpada certa. */
+  barram: string[];
+}) {
   const mesFechado = ultimoMesFechado();
 
   const [agregado, perfis, emQueda] = await Promise.all([
@@ -64,7 +71,14 @@ export async function MetricasDaCarteira({ confiavel }: { confiavel: boolean }) 
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Secao titulo="Top 5 do ano" sub={`${agregado._count} clientes faturados.`}>
+      {/* ⚠ O subtítulo também passa pelo portão. Ele contava "37 clientes
+          faturados" logo acima de um painel dizendo que o ranking é
+          indisponível — um número preciso sobre a mesma base que a seção
+          acabava de declarar não confiável. */}
+      <Secao
+        titulo="Top 5 do ano"
+        sub={confiavel ? `${agregado._count} clientes faturados.` : "Aguardando a carga fechar."}
+      >
         <Painel
           rodape={
             <>
@@ -127,7 +141,7 @@ export async function MetricasDaCarteira({ confiavel }: { confiavel: boolean }) 
         <Painel>
           {!confiavel ? (
             <p className="px-4 py-5 text-[14px] text-[var(--tinta-3)]">
-              Indisponível enquanto a carga de cobranças não fechar.
+              Indisponível enquanto a carga não fechar em: {barram.join(", ")}.
             </p>
           ) : emQueda.length === 0 ? (
             <p className="px-4 py-5 text-[14px] text-[var(--tinta-3)]">

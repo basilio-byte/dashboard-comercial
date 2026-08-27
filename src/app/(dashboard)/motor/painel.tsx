@@ -48,8 +48,14 @@ export function PainelOperacao() {
       <div className="px-4 py-4">
         <p className="max-w-3xl text-[13.5px] leading-relaxed text-[var(--tinta-3)]">
           <strong className="font-semibold text-[var(--tinta-2)]">
-            As quatro rodam sozinhas pelo agendador embutido.
+            Rodam sozinhas pelo agendador embutido — desde que ele esteja ligado.
           </strong>{" "}
+          {/* ⚠ Era afirmação incondicional sobre algo que depende de
+              SYNC_SCHEDULER e INTEL_SCHEDULER, exibidos nesta mesma página
+              algumas seções abaixo. Com o agendador desligado, a frase dizia
+              que a carga anda sozinha enquanto nada andava. */}
+          Confira <strong className="font-semibold text-[var(--tinta-2)]">Configuração</strong>,
+          abaixo: com o agendador desligado, nada roda sem estes botões.{" "}
           Estes botões são para empurrar na frente da fila — não são obrigatórios. A carga é feita{" "}
           <strong className="font-semibold text-[var(--tinta-2)]">por janela mensal</strong>, da mais
           recente para a mais antiga, e prioriza o que destrava a fila do Radar (contratos e

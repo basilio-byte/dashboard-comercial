@@ -635,8 +635,22 @@ export async function pulsoDaCarga(): Promise<{
   ultimaEscrita: Date | null;
   janelaEmAndamento: { entidade: string; janela: string } | null;
   pendentes: number;
+  /**
+   * Entidades cujo FUNDO do histórico já foi alcançado.
+   *
+   * ⚠ Sem isto o selo "carga completa" era estruturalmente incapaz de estar
+   * certo. `pendentes === 0` significa "nenhuma janela ABERTA está pendente" —
+   * e no começo da carga não existe janela nenhuma além da corrente. Zero
+   * pendentes é o estado do primeiro minuto tanto quanto o do fim.
+   *
+   * A completude de verdade é a mesma regra do agendador: todas as janelas
+   * concluídas **e** o fundo alcançado nas cinco entidades, o que só se sabe
+   * depois de seis janelas vazias seguidas — porque a API não devolve os
+   * registros em ordem e não dá para perguntar "qual é o mais antigo".
+   */
+  fundos: number;
 }> {
-  const [agg, emAndamento, pendentes] = await Promise.all([
+  const [agg, emAndamento, pendentes, fundos] = await Promise.all([
     prisma.syncWindow.aggregate({ _max: { atualizadaEm: true } }),
     prisma.syncWindow.findFirst({
       where: { status: "EM_ANDAMENTO" },
@@ -644,12 +658,14 @@ export async function pulsoDaCarga(): Promise<{
       select: { entidade: true, janela: true },
     }),
     prisma.syncWindow.count({ where: { status: { not: "CONCLUIDA" } } }),
+    prisma.syncState.count({ where: { key: { startsWith: "fundo:" } } }),
   ]);
 
   return {
     ultimaEscrita: agg._max.atualizadaEm ?? null,
     janelaEmAndamento: emAndamento,
     pendentes,
+    fundos,
   };
 }
 

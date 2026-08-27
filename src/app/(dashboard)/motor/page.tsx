@@ -30,9 +30,34 @@ export default async function Motor() {
   ]);
   const [clientes, contratos, cobrancas, vendas, planos] = contagens;
 
-  const ultimoSucesso = runs.find((r) => r.status === "SUCCESS" && r.finishedAt);
-  const horasDesdeSync = ultimoSucesso?.finishedAt
-    ? (Date.now() - ultimoSucesso.finishedAt.getTime()) / 3_600_000
+  /**
+   * ⚠ Consulta PRÓPRIA, e filtrada por modo — não uma varredura dos 15 runs
+   * exibidos na tabela.
+   *
+   * Dois defeitos de uma vez, na versão anterior:
+   *
+   * 1. `runs.find(r => r.status === "SUCCESS")` pegava `intelligence`, que roda
+   *    a cada 30 min e **não toca na API**. O aviso "os números podem estar
+   *    velhos" nunca aparecia, porque o relógio da consolidação estava sempre
+   *    fresco. O aviso existia e era estruturalmente incapaz de disparar.
+   * 2. Procurar dentro de `take: 15` significa que, num dia de muitas
+   *    execuções, a última leitura real cai fora da fatia e o aviso volta a
+   *    sumir — por um motivo diferente e ainda mais difícil de ver.
+   *
+   * `HALTED` conta como progresso: o próprio rodapé desta tela explica que
+   * HALTED não é falha, é o orçamento de tempo acabando com dado já gravado.
+   */
+  const ultimaLeitura = await prisma.syncRun.findFirst({
+    where: {
+      mode: { in: ["dimensions", "backfill", "incremental", "revisita"] },
+      status: { in: ["SUCCESS", "HALTED"] },
+      finishedAt: { not: null },
+    },
+    orderBy: { finishedAt: "desc" },
+    select: { finishedAt: true },
+  });
+  const horasDesdeSync = ultimaLeitura?.finishedAt
+    ? (Date.now() - ultimaLeitura.finishedAt.getTime()) / 3_600_000
     : null;
 
   return (
@@ -55,8 +80,22 @@ export default async function Motor() {
 
         {horasDesdeSync !== null && horasDesdeSync > 2 ? (
           <Faixa tom="atencao">
-            Última sincronização bem-sucedida há <strong>{horasDesdeSync.toFixed(1)}h</strong>.
-            Acima de 2h, os números da tela podem estar velhos.
+            Última <strong>leitura do Conexa</strong> há <strong>{horasDesdeSync.toFixed(1)}h</strong>.
+            Acima de 2h, os números da tela podem estar velhos. (A consolidação da inteligência
+            roda a cada 30 min sobre o espelho local e <strong>não</strong> conta aqui — ela não
+            fala com o ERP.)
+          </Faixa>
+        ) : null}
+
+        {/* ⚠ Ausência de leitura é pior que leitura velha, e antes não aparecia
+            em lugar nenhum: sem nenhum run de leitura, `horasDesdeSync` é null e
+            a faixa acima some — a tela ficava silenciosa exatamente no estado em
+            que o espelho não está sendo alimentado. */}
+        {conexaConfigurado() && horasDesdeSync === null ? (
+          <Faixa tom="critico">
+            <strong>Nenhuma leitura do Conexa registrada.</strong> O espelho não está sendo
+            alimentado — nem carga histórica, nem incremental, nem revarredura. Confira o
+            agendador na seção de configuração abaixo.
           </Faixa>
         ) : null}
 
@@ -96,6 +135,7 @@ export default async function Motor() {
               ultimaEscritaISO={pulso.ultimaEscrita?.toISOString() ?? null}
               janelaEmAndamento={pulso.janelaEmAndamento}
               pendentes={pulso.pendentes}
+              fundos={pulso.fundos}
             />
           }
         >
@@ -194,9 +234,15 @@ export default async function Motor() {
                 <>
                   <strong>HALTED</strong> não é falha: é o orçamento de tempo da execução acabando
                   — o caso normal do agendador, que trabalha 8,5 min a cada 10. O progresso fica
-                  gravado por janela e a próxima execução continua exatamente dali.{" "}
-                  <strong>backfill</strong> é a carga histórica e <strong>incremental</strong> é a
-                  releitura das janelas recentes; as duas rodam sozinhas.
+                  gravado por janela e a próxima execução continua exatamente dali.
+                  <br />
+                  Os modos: <strong>dimensions</strong> (cadastros), <strong>backfill</strong>{" "}
+                  (carga histórica), <strong>incremental</strong> (releitura das janelas recentes,
+                  a cada 30 min), <strong>revisita</strong> (revarredura profunda diária, atrás de
+                  registro antigo que MUDOU), <strong>reconcile</strong> (conferência sob demanda)
+                  e <strong>intelligence</strong> — este último{" "}
+                  <strong>não fala com o Conexa</strong>, só recalcula sobre o espelho local, e por
+                  isso não conta como sincronização.
                 </>
               }
             >
@@ -243,11 +289,13 @@ export default async function Motor() {
           <Painel
             rodape={
               <>
-                Teto medido da API: <strong>60 req/min</strong>. Em 22 janelas consecutivas medidas
-                em 2026-08-26, o consumo de terceiros foi <strong>zero</strong> — o financeiro em
-                produção usa login web, não a API v2. O ritmo configurado é um teto, não um alvo: em
-                regime o comercial gasta ~50 requisições por dia. A folga existe para a rajada
-                futura dos agentes do Chatwoot.
+                Teto da API: <strong>60 requisições por janela de 60s</strong>, confirmado por
+                stress sustentado em 2026-08-27 — 220 requisições seguidas, corte na #58. O consumo
+                de terceiros é <strong>zero</strong>: o financeiro em produção usa login web, não a
+                API v2. ⚠ A API <strong>não</strong> devolve cabeçalho de saldo em resposta normal,
+                então o ritmo é controlado pelo limitador local, nunca por leitura de header. O
+                ritmo configurado é um teto, não um alvo, e a folga existe para a rajada futura dos
+                agentes do Chatwoot.
               </>
             }
           >
@@ -256,8 +304,13 @@ export default async function Motor() {
               <Item termo="Fuso" valor={env.APP_TIMEZONE} />
               <Item termo="Agendador de leitura" valor={env.SYNC_SCHEDULER} />
               <Item termo="Agendador de inteligência" valor={env.INTEL_SCHEDULER} />
-              <Item termo="Disparo" valor={env.NOTIFICADOR} />
-              <Item termo="Modo de disparo" valor={env.NOTIFICADOR_MODO} />
+              {/* ⚠ Rotulado como "planejado": a camada de disparo NÃO existe —
+                  `src/lib/disparo/` não está no repositório, e estas duas
+                  variáveis não são lidas por nenhum código que dispare coisa
+                  alguma. Exibi-las como configuração ativa faz a tela prometer
+                  um comportamento que não acontece. */}
+              <Item termo="Disparo (planejado)" valor={env.NOTIFICADOR} />
+              <Item termo="Modo de disparo (planejado)" valor={env.NOTIFICADOR_MODO} />
             </dl>
           </Painel>
         </Secao>

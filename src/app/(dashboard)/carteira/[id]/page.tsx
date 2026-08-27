@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Wallet, CalendarRange, Clock } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { formatBRL } from "@/lib/money";
+import { cotaMensalDoContratoRaw } from "@/lib/conexa/mappers";
 import { currentMonthKey, rotuloMes, ultimosMesesFechados } from "@/lib/dates";
 import { Lacuna, Procedencia } from "@/components/Procedencia";
 import { corVariacao, pct } from "@/lib/ui";
@@ -100,6 +101,14 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
             <div className="flex items-center gap-1.5 text-[13.5px] font-medium text-[var(--tinta-2)]">
               <Clock size={13.5} className="shrink-0 text-[var(--tinta-3)]" />
               Horas inclusas por mês
+              {perfil?.contratosAtivos != null && perfil.contratosAtivos > 1 ? (
+                <span
+                  className="selo selo-atencao"
+                  title="Soma das cotas de todos os contratos ativos deste cliente. As cotas podem ser de baldes diferentes, e nesse caso a soma não é um saldo único."
+                >
+                  soma de {perfil.contratosAtivos}
+                </span>
+              ) : null}
             </div>
             <div className="num mt-2 text-[27px] font-semibold leading-none tracking-[-0.02em]">
               {perfil?.horasInclusasMes != null ? (
@@ -220,7 +229,17 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
                           <td className="num text-[var(--tinta-2)]">{fmtData(c.startDate)}</td>
                           <td className="num text-[var(--tinta-2)]">{fmtData(c.endDate)}</td>
                           <td className="num text-right">
-                            {plano?.horasInclusasMes != null ? (
+                            {/* ⚠ O CONTRATO manda, o plano é o padrão — é o que
+                                `concessaoDoContrato` faz, e ler só o plano aqui
+                                marcava "sem cota" contrato que declara a sua
+                                própria. Foi exatamente o defeito que produziu
+                                saldo negativo em produção, sobrevivendo nesta
+                                célula depois de corrigido no cálculo. */}
+                            {Array.isArray(c.hourPlanQuotaRaw) && c.hourPlanQuotaRaw.length > 0 ? (
+                              <span title="Cota declarada no próprio contrato, que tem precedência sobre a do plano">
+                                {`${cotaMensalDoContratoRaw(c.hourPlanQuotaRaw) ?? "—"}h`}
+                              </span>
+                            ) : plano?.horasInclusasMes != null ? (
                               `${Number(plano.horasInclusasMes)}h`
                             ) : (
                               <span className="text-[var(--tinta-3)]">sem cota</span>

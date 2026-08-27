@@ -78,7 +78,7 @@ export default async function Carteira({
                 Nenhum cliente com <strong>{busca}</strong> no nome.
               </>
             ) : (
-              "Nenhum cliente no espelho ainda — rode a primeira carga em Motor."
+              "Nenhum cliente no espelho ainda. A carga roda sozinha — acompanhe o progresso em Motor."
             )}
           </Vazio>
         ) : (
@@ -148,12 +148,22 @@ export default async function Carteira({
                             confiavel={espelho.receitaConfiavel}
                           />
                         </td>
+                        {/* ⚠ Mesmo portão da coluna de receita ao lado. A
+                            variação é derivada da MESMA receita, então liberá-la
+                            enquanto a receita diz "não disponível" imprime um
+                            "-100,0%" vermelho sobre dado que a própria linha
+                            acabou de declarar indisponível — e vermelho é o que
+                            o olho lê primeiro. */}
                         <td
-                          className={`num text-right ${corVariacao(
-                            v === null || v === undefined ? null : Number(v),
-                          )}`}
+                          className={`num text-right ${
+                            espelho.receitaConfiavel
+                              ? corVariacao(v === null || v === undefined ? null : Number(v))
+                              : ""
+                          }`}
                         >
-                          {pct(v === null || v === undefined ? null : Number(v))}
+                          {espelho.receitaConfiavel
+                            ? pct(v === null || v === undefined ? null : Number(v))
+                            : "—"}
                         </td>
                       </tr>
                     );
@@ -165,7 +175,10 @@ export default async function Carteira({
         )}
 
         <Nota>
-          <Procedencia tipo="DERIVADO" /> receita no regime de emissão ·{" "}
+          {/* ⚠ O selo segue o portão. Cravado como DERIVADO, ele certificava a
+              procedência de uma coluna que, ao lado, dizia "não disponível". */}
+          <Procedencia tipo={espelho.receitaConfiavel ? "DERIVADO" : "INDISPONIVEL"} /> receita no
+          regime de emissão ·{" "}
           <Procedencia tipo="API" /> horas inclusas vêm de{" "}
           <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">plan.hourQuotas</code>
           . &quot;Sem cota&quot; significa plano sem horas inclusas, e não zero hora.
@@ -175,7 +188,10 @@ export default async function Carteira({
 
         {/* Métricas exigidas pela especificação do Diego, movidas do Radar:
             receita é atributo do cliente, não resposta a "quem procurar hoje". */}
-        <MetricasDaCarteira confiavel={espelho.receitaConfiavel} />
+        <MetricasDaCarteira
+          confiavel={espelho.receitaConfiavel}
+          barram={espelho.barramReceita}
+        />
 
         <hr className="divisor !mt-10" />
 

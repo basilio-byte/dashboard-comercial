@@ -94,9 +94,26 @@ export async function SerieMensalDaCarteira() {
                       />
                     </span>
                   </td>
-                  <td className="num text-right text-[var(--tinta-3)]">{p.cobrancas}</td>
-                  <td className="num text-right font-medium">{formatBRL(p.receita)}</td>
-                  <td className={`num text-right ${corVariacao(p.variacao)}`}>{pct(p.variacao)}</td>
+                  {/* ⚠ As três colunas passam pelo MESMO portão do total do
+                      cabeçalho. Antes só o total era protegido: a tabela abaixo
+                      dele imprimia "R$ 0,00" mês a mês, com cara de fato, sobre
+                      exatamente a receita que o cabeçalho acabava de declarar
+                      indisponível. Um portão que protege o resumo e libera o
+                      detalhe não é portão — é decoração. */}
+                  <td className="num text-right text-[var(--tinta-3)]">
+                    {espelho.receitaConfiavel ? p.cobrancas : "—"}
+                  </td>
+                  <td className="num text-right font-medium">
+                    <ValorOuLacuna
+                      valor={formatBRL(p.receita)}
+                      confiavel={espelho.receitaConfiavel}
+                    />
+                  </td>
+                  <td
+                    className={`num text-right ${espelho.receitaConfiavel ? corVariacao(p.variacao) : ""}`}
+                  >
+                    {espelho.receitaConfiavel ? pct(p.variacao) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

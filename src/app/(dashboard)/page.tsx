@@ -171,16 +171,35 @@ export default async function Radar() {
         </Secao>
 
         {/* O detalhamento dos gatilhos vive em tela própria — repetir aqui
-            competiria com a fila, que é o produto desta tela. */}
+            competiria com a fila, que é o produto desta tela.
+
+            ⚠ Esta faixa dizia "Só UM gatilho está ativo hoje", com o número
+            cravado, e errava duas vezes:
+
+            1. "ativo" é o vocabulário da FICHA do cliente, onde ele é plural —
+               `sinaisDoCliente()` marca ATIVO em oito regras diferentes, e a
+               ficha imprime "N gatilhos ativos". O que é único não é o gatilho
+               ativo: é o que alimenta ESTA fila.
+            2. o "um" era constante em JSX descrevendo estado de runtime. O
+               gatilho de excedente só fica ligado com `horasConfiavel`; sem ele
+               a resposta certa é zero — e a faixa aparecia, sem condicional
+               nenhum, logo abaixo de "a fila ainda não pode ser calculada",
+               afirmando que havia um gatilho ativo na mesma tela que dizia não
+               conseguir calcular nada.
+
+            Sem número agora. A tela Gatilhos deriva a contagem e é a dona dela;
+            duplicá-la aqui só cria um segundo lugar para ficar errado. */}
         <Faixa tom="info">
-          Só <strong>um gatilho</strong> está ativo hoje. Veja em{" "}
+          Nem todo gatilho alimenta esta fila — os outros já são avaliados{" "}
+          <strong>cliente a cliente</strong>, na ficha. Veja em{" "}
           <Link
             href="/gatilhos"
             className="font-medium text-[var(--acento-tinta)] underline underline-offset-2"
           >
             Gatilhos
           </Link>{" "}
-          o que falta para os outros — fila vazia só significa algo quando se sabe o que está ligado.
+          o estado de cada um, e de quem é a próxima ação. Fila vazia só significa alguma coisa
+          quando se sabe o que está ligado.
         </Faixa>
       </div>
     </>

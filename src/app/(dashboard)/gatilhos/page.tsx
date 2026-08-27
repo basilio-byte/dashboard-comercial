@@ -13,15 +13,30 @@ export const dynamic = "force-dynamic";
  * "ninguém tem oportunidade hoje" e "o motor está desligado" têm a mesma
  * aparência, e a segunda é como uma automação morre sem ninguém perceber.
  *
- * ⚠ Os estados são os de `docs/context/regras-comerciais.md`, que é a análise
- * de viabilidade do documento do Diego cruzada com o que a Fase 0 mediu contra
- * a API. Eu cheguei a inventar aqui uma taxonomia paralela ("pronto para
+ * ⚠ Os estados espelham a análise de viabilidade de
+ * `docs/context/regras-comerciais.md`, cruzada com o que foi medido contra a
+ * API. Eu cheguei a inventar aqui uma taxonomia paralela ("pronto para
  * implementar") e ela estava ERRADA em três regras — dizia pronto o que o
  * repositório já tinha analisado como tendo ressalva concreta. Uma tela que
  * discorda da análise do próprio projeto é pior que uma tela sem estado.
+ *
+ * Mudar estado aqui **obriga a mexer naquele documento também**, e vice-versa.
+ * Foi o que aconteceu em 2026-08-27, quando as regras 2 e 9 passaram de
+ * "ressalva" a bloqueio de permissão: a tela e o documento mudaram juntos. Os
+ * dois divergirem em silêncio é como a taxonomia errada nasceu da primeira vez.
  */
 
-type Estado = "ligado" | "viavel" | "ressalva" | "definicao";
+/**
+ * ⚠ Os quatro estados respondem **de quem é a próxima ação**, não "quanto falta".
+ *
+ * O quarto estado já se chamou `definicao` e aparecia como "aguarda conferência —
+ * falta validar o saldo". Era falso desde 2026-08-27: não há conferência possível.
+ * As horas do pacote vivem atrás de `/packages`, que responde **404 por permissão**
+ * — ninguém dentro deste projeto pode destravar isso conferindo coisa alguma. Um
+ * rótulo que pede uma ação impossível é pior que um rótulo que diz "bloqueado":
+ * manda a pessoa procurar o trabalho onde ele não está.
+ */
+type Estado = "ligado" | "naFicha" | "ressalva" | "bloqueado";
 
 interface Gatilho {
   n: string;
@@ -52,7 +67,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "nenhum contrato com cota, mas passou de 5h no mês",
       oferta: "pacote de horas",
       familia: "USO_SEM_COTA",
-      estado: "viavel",
+      estado: "naFicha",
       nota: "função pura escrita e testada · a economia vs. avulso NÃO sai: o próprio documento (§3.1) registra que a API não expõe preço por hora por produto. A task sai com a lacuna declarada, nunca com número estimado",
     },
     {
@@ -61,7 +76,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "plano de Endereço Fiscal sem horas inclusas + fez reserva",
       oferta: "Pacote de Horas ou upgrade para Batial (2h/mês)",
       familia: "EVENTO_EM_SEGMENTO",
-      estado: "viavel",
+      estado: "naFicha",
       nota: "função pura escrita e testada · o tier vem da cota do plano, não do nome — Litoral sem cota, Batial 2h, Abissal 8h, medido na Fase 0",
     },
     {
@@ -88,7 +103,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "primeira reserva do cliente, na data",
       oferta: "Endereço Fiscal + SeaBox",
       familia: "PRIMEIRO_EVENTO",
-      estado: reservasOk ? "viavel" : "ressalva",
+      estado: reservasOk ? "naFicha" : "ressalva",
       nota: reservasOk
         ? "destravada pela carga completa de reservas (37/37) · a data de corte é parâmetro obrigatório: sem ela, todo cliente antigo parece estreante e saem milhares de tasks de uma vez"
         : "sem o histórico completo de reservas, todo cliente antigo parece estreante",
@@ -99,7 +114,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "1 mês do início do contrato de sala privativa",
       oferta: "Registro de Marca",
       familia: "MARCO_CONTRATO",
-      estado: "viavel",
+      estado: "naFicha",
       nota: 'decidido em 2026-08-27: identifica pela CATEGORIA do plano, e a estação de coworking CONTA — a categoria "Salas Privativas - Seaway Center" vale inteira · âncora startDate, por coerência com a regra 1',
     },
     {
@@ -117,7 +132,7 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "aniversário de 6 meses do contrato",
       oferta: "Panteão",
       familia: "MARCO_CONTRATO",
-      estado: "viavel",
+      estado: "naFicha",
       nota: "decidido em 2026-08-27: ANIVERSÁRIO, não janela aberta — a diferença é entre uma oferta e cento e oitenta · identificação pela categoria, com a estação contando · produto confirmado na Fase 0 (3380/3381)",
     },
     {
@@ -126,8 +141,8 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "saldo do pacote abaixo do limiar",
       oferta: "novo pacote",
       familia: "SALDO_COTA",
-      estado: "definicao",
-      nota: "o saldo é DERIVADO, não lido: o documento (§3.1) registra que a API não expõe saldo de pacote. Precisa bater contra a tela do Conexa antes de virar oferta — ~20 linhas na tela Confiança",
+      estado: "bloqueado",
+      nota: "medido em 2026-08-27: a hora do pacote vem de `recurringSales.packageId`, e `/packages` responde 404 POR PERMISSÃO — não existe caminho pela API. Dos 122 clientes com cota, 4 têm consumo acima do concedido, e os 4 têm pacote; nenhum sem pacote estoura. O saldo não é calculável com o token atual, e nenhuma conferência muda isso: só a liberação do endpoint pelo admin do Conexa",
     },
     {
       n: "9",
@@ -135,8 +150,8 @@ function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
       condicao: "saldo do pacote menor que 5h",
       oferta: "novo pacote",
       familia: "SALDO_COTA",
-      estado: "definicao",
-      nota: "mesma mecânica da regra 2, outro limiar — as duas passam ou reprovam juntas na conferência",
+      estado: "bloqueado",
+      nota: "mesma mecânica da regra 2, outro limiar — as duas destravam juntas, no dia em que `/packages` responder",
     },
     {
       n: "métrica",
@@ -166,30 +181,30 @@ const ESTILO: Record<
     rotulo: "ligado",
     deQuem: "disparando no Radar",
   },
-  viavel: {
+  naFicha: {
     classeSelo: "selo-info",
     classeAresta: "bg-[var(--acento)]",
     Icone: CircleDashed,
-    rotulo: "viável",
-    deQuem: "dado e regra prontos",
+    rotulo: "só na ficha",
+    deQuem: "avaliado por cliente, sem fila",
   },
   ressalva: {
     classeSelo: "selo-atencao",
     classeAresta: "bg-[var(--atencao)]",
     Icone: TriangleAlert,
     rotulo: "com ressalva",
-    deQuem: "falta uma decisão",
+    deQuem: "falta uma decisão nossa",
   },
-  definicao: {
+  bloqueado: {
     classeSelo: "selo-critico",
     classeAresta: "bg-[var(--critico)]",
     Icone: Ban,
-    rotulo: "aguarda conferência",
-    deQuem: "falta validar o saldo",
+    rotulo: "bloqueado por terceiro",
+    deQuem: "depende do admin do Conexa",
   },
 };
 
-const ORDEM_RESUMO: Estado[] = ["ligado", "viavel", "ressalva", "definicao"];
+const ORDEM_RESUMO: Estado[] = ["ligado", "naFicha", "ressalva", "bloqueado"];
 
 export default async function Gatilhos() {
   const espelho = await estadoDoEspelho();
@@ -197,6 +212,15 @@ export default async function Gatilhos() {
   const lista = gatilhos(espelho.horasConfiavel, reservasOk);
   const contagem = (e: Estado) => lista.filter((g) => g.estado === e).length;
   const ligados = contagem("ligado");
+  // ⚠ "1 de 12 disparando" era enganoso: `sinaisDoCliente()` avalia na ficha do
+  // cliente TODAS menos as bloqueadas — o que não chega é a fila que varre a base.
+  // O selo passa a contar o que de fato chega ao Radar, e o subtítulo diz o resto,
+  // em vez de esconder as outras atrás de um "não".
+  //
+  // Derivado de `contagem`, não escrito à mão: um "10 de 12" cravado aqui vira
+  // mentira no dia em que uma regra mudar de estado, que é justamente o dia em que
+  // ninguém vai reler este arquivo.
+  const avaliados = lista.length - contagem("bloqueado");
 
   return (
     <>
@@ -205,12 +229,14 @@ export default async function Gatilhos() {
         sub={
           <>
             O que dispara uma oferta — e, principalmente, o que ainda <strong>não</strong> dispara.
-            Uma fila vazia só quer dizer alguma coisa quando se sabe o que está ligado.
+            Uma fila vazia só quer dizer alguma coisa quando se sabe o que está ligado.{" "}
+            <strong>{avaliados}</strong> dos {lista.length} já são avaliados na ficha de cada
+            cliente; <strong>{ligados}</strong> {ligados === 1 ? "chega" : "chegam"} ao Radar.
           </>
         }
         acao={
           <span className={cn("selo", ligados > 0 ? "selo-bom" : "selo-atencao")}>
-            {ligados} de {lista.length} disparando
+            {ligados} {ligados === 1 ? "chega" : "chegam"} ao Radar
           </span>
         }
       />
@@ -243,15 +269,23 @@ export default async function Gatilhos() {
           })}
         </div>
 
+        {/* ⚠ Sem número de teste aqui. A faixa dizia "26 testes" e eram 34 — uma
+            constante em JSX que descreve o código deriva sempre, e derivar num
+            lugar que serve justamente para provar rigor é o pior lugar. */}
         <Faixa tom="info">
           <strong>As regras já existem como funções puras testadas</strong> —{" "}
           <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
             src/lib/regras/familias.ts
           </code>
-          , 26 testes. O que falta para virarem oferta de verdade é a{" "}
-          <strong>camada de disparo</strong>: criar task no ClickUp para o vendedor responsável.
-          Ela não existe, e depende de o ClickUp entrar — é de lá que sai o vendedor, segundo o
-          documento (§2).
+          . O gargalo <strong>não é mais escrever regra</strong>: é que o sinal só aparece{" "}
+          <strong>abrindo cliente por cliente</strong>. Numa amostra de 10 clientes, 6 tinham
+          sinal ativo — com milhares de clientes, um sinal que exige abrir a ficha é o mesmo que
+          não existir. O que falta é a <strong>fila que varre a base</strong> (
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
+            src/lib/regras/fila.ts
+          </code>
+          , escrita e ainda sem consumidor). O disparo no ClickUp vem depois, por decisão do
+          responsável: validar tudo dentro do painel primeiro.
         </Faixa>
 
         <Secao

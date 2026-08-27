@@ -44,7 +44,9 @@ export async function SecaoReconciliacao() {
 
       <Faixa tom="atencao">
         <strong>Custa requisições:</strong> varre o mês inteiro na API. Rode sob demanda, não em
-        laço — o teto de 60 req/min é dividido com o Dashboard Financeiro.
+        laço. Os 60 req/min <strong>são inteiros do comercial</strong> — o financeiro em produção
+        usa login web, não a API v2 —, mas a carga automática disputa o mesmo teto, e a folga
+        existe para a futura rajada dos agentes do Chatwoot.
       </Faixa>
 
       {usuario?.role === "ADMIN" ? (

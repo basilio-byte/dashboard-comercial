@@ -14,8 +14,26 @@ import { cn } from "@/lib/ui";
  * sobre dado de ontem manda o vendedor ligar para o cliente errado.
  */
 export async function BarraSuperior({ nome, email }: { nome: string; email?: string }) {
+  /**
+   * ⚠ Filtra por MODO. Sem isso o selo mentia: `consolidarTudo()` abre um run
+   * `intelligence` a cada 30 minutos, fecha SUCCESS — e **não fala com o
+   * Conexa**, só recalcula sobre o espelho local. O selo dizia "sincronizado
+   * 17:16" com a última leitura real do ERP horas atrás.
+   *
+   * É a pior classe de mentira que uma tela de dado pode contar: ela responde
+   * exatamente a pergunta "posso confiar no que estou vendo?" — e respondia sim
+   * olhando para o relógio errado.
+   *
+   * `HALTED` conta: é o fim NORMAL de uma carga que gastou o orçamento de tempo
+   * depois de gravar dado. Exigir SUCCESS descartaria justamente o caso comum do
+   * agendador.
+   */
   const ultimo = await prisma.syncRun.findFirst({
-    where: { status: "SUCCESS" },
+    where: {
+      mode: { in: ["dimensions", "backfill", "incremental", "revisita"] },
+      status: { in: ["SUCCESS", "HALTED"] },
+      finishedAt: { not: null },
+    },
     orderBy: { finishedAt: "desc" },
     select: { finishedAt: true },
   });

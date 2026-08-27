@@ -337,11 +337,18 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
   );
 
   // ── SALDO_COTA · regras 2 e 9 ───────────────────────────────────────────
-  // O documento (§3.1) diz que a API não expõe o saldo. Ele é derivado, e
-  // derivado não conferido NÃO vira sinal — é a regra de ouro do projeto.
+  //
+  // ⚠ NÃO é "conferência pendente". Medido em 2026-08-27 contra produção: a
+  // hora que falta vem de pacote recorrente (`recurringSales.packageId`), e
+  // `/packages`, `/package/:id` e `/hourPackages` respondem **404 por
+  // permissão**. Não existe caminho pela API — nenhuma conferência muda isso.
+  //
+  // O texto anterior mandava o vendedor esperar um trabalho nosso que não
+  // existe. Dizer "depende do admin do Conexa" é a diferença entre alguém
+  // pedir a liberação e alguém esperar para sempre.
   for (const [regra, nome] of [["2", "Pacote de horas acabando"], ["9", "Pacote abaixo de 5h"]] as const) {
     sinais.push(indisponivel(regra, nome, "SALDO_COTA", "novo pacote",
-      "O saldo é derivado e ainda não foi conferido contra a tela do Conexa. Nenhum disparo acontece sobre ele — ver Confiança."));
+      "As horas do pacote comprado vêm de `recurringSales.packageId`, e `/packages` responde 404 por permissão deste token. O saldo não é calculável — depende de o admin do Conexa liberar o endpoint."));
   }
 
   const ordem = ["extra", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "métrica"];

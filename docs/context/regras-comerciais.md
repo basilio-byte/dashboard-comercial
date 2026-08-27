@@ -17,7 +17,7 @@ a IA, se usada, entra só para redigir o texto da abordagem.
 |---|---|
 | ✅ **VIÁVEL** | Os dados existem e a regra está definida o bastante para virar código |
 | ⚠️ **RESSALVA** | Depende de resposta do cliente ou de uma reconciliação que pode reprovar |
-| ⛔ **BLOQUEADA POR DADO** | O dado não existe na API. Não é atraso — é impossibilidade com o que temos hoje |
+| ⛔ **BLOQUEADA** | O dado não é obtível com o que temos hoje. Não é atraso — e a distinção que importa é **por quê**: dado que não existe na API, ou dado atrás de um **404 de permissão** (no Conexa, 404 quer dizer "não liberado para este token", nunca "não existe"). O segundo caso se resolve com um pedido ao admin, não com código |
 | ❓ **PRECISA DEFINIÇÃO** | A regra não está definida o bastante para virar código |
 
 ## Resumo
@@ -25,14 +25,14 @@ a IA, se usada, entra só para redigir o texto da abordagem.
 | # | Regra | Família | Status |
 |---|---|---|---|
 | 1 | Fiscal 11 meses → plano Bianual | `MARCO_CONTRATO` | ⚠️ |
-| 2 | Pacote de horas acabando | `SALDO_COTA` | ⚠️ |
+| 2 | Pacote de horas acabando | `SALDO_COTA` | ⛔ *(permissão — ver abaixo)* |
 | 3 | Padrão de compra irregular | `TENDENCIA` | ❓ |
 | 4 | Avulso com uso alto (>5h) | `USO_SEM_COTA` | ✅ |
 | 5 | Primeira reserva → Endereço Fiscal + SeaBox | `PRIMEIRO_EVENTO` | ⚠️ |
 | 6 | Privativa 1 mês → Registro de Marca | `MARCO_CONTRATO` | ⚠️ |
 | 7 | Privativa 2 meses → SeaBox | `MARCO_CONTRATO` | ⚠️ |
 | 8 | Privativa até 6 meses → Panteão | `MARCO_CONTRATO` | ⚠️ *(desbloqueada na Fase 0)* |
-| 9 | Pacote < 5h → novo pacote | `SALDO_COTA` | ⚠️ |
+| 9 | Pacote < 5h → novo pacote | `SALDO_COTA` | ⛔ *(permissão — ver abaixo)* |
 | 10 | Endereço Litoral + reserva → Pacote ou Batial | `EVENTO_EM_SEGMENTO` | ✅ *(desbloqueada na Fase 0)* |
 | 11 | *(bônus)* Queda de receita ≥ X% | `TENDENCIA` | ⚠️ |
 
@@ -87,18 +87,46 @@ cancellationReason`
 
 ```
 concedido = hourPlanQuota ?? plan.hourQuotas ?? cadastro manual     (precedência do ADR-0005)
-consumido = Σ (finalTime − startTime) onde status == 'deductedFromQuota'
+            ⚠ INCOMPLETO: pacote recorrente concede horas que a API não expõe
+abatido   = Σ (finalTime − startTime) onde status == 'deductedFromQuota'
                                         ∧ mesmo balde ∧ mesmo ciclo
                                         ∧ isActive ∧ ¬cancelada
-saldo     = concedido − consumido
+faturado  = Σ idem onde status ∈ {paid, billed}          (o excedente, já cobrado)
+consumido = abatido + faturado
+saldo     = concedido − abatido        ⚠ NÃO `− consumido`: o faturado já foi cobrado,
+                                         subtraí-lo de novo derruba o saldo duas vezes
+                                         justamente para quem estourou a cota
 dispara se saldo/concedido ≤ params.limiar ∧ diasRestantes ≥ params.minDias
 ```
 
 **Ciclo.** `quota:{balanceId}:{cycleKey}` — a cota renova por ciclo, e há cotas diárias.
 
-**Ressalvas.** Dependem do portão de reconciliação do [ADR-0005](decisions.md). A âncora do ciclo,
-o carry-over e a dedução parcial seguem **NÃO CONFIRMADOS** — não têm resposta na API, são
-comportamento de produto.
+⛔ **BLOQUEADAS POR PERMISSÃO — medido em 2026-08-27 contra produção.** As regras 2 e 9 não
+dependem mais de conferência: **o saldo não é calculável com o token atual.**
+
+A hora que falta vem de **pacote recorrente** (`recurringSales.packageId`), e `/packages`,
+`/package/:id` e `/hourPackages` respondem **404**. Não existe caminho pela API para saber
+quantas horas o pacote concede.
+
+A correlação foi medida nos dois sentidos, no ciclo de aniversário de cada contrato:
+
+| | tem pacote recorrente | sem pacote |
+| --- | --- | --- |
+| **abatido > concedido** | **4** | **0** |
+| conta fecha | 117 | 1 |
+
+Nenhum cliente estoura a cota sem ter pacote. Três hipóteses morreram antes dessa, todas contra
+dado: a cota vir do plano em vez do contrato (corrigido, o defeito sobreviveu); `validityType`
+diferente de `Monthly` sendo descartado (os 24 planos com cota usam `Monthly`); e o produto do
+pacote declarar as horas (`/products` tem 13 campos, nenhum é quantidade).
+
+O sistema já se comporta certo: `cotaInconsistente` **suprime** o gatilho nesses clientes em vez
+de ofertar em cima de conta errada. Destravar é **pedido ao admin do Conexa**, não tarefa de
+código.
+
+✅ **Respondidos pelo responsável em 2026-08-26:** a âncora do ciclo é o **aniversário mensal da
+contratação**, **não há carry-over**, e a **dedução é parcial** (5h de cota com 7h de uso = 5h
+abatidas + 2h faturadas).
 
 ✅ **Corrigido pela [Fase 0](fase-0-conclusoes.md):** eu havia escrito que cotas por `groupId`
 são bloqueadas. **Na prática não são.** É verdade que não existe endpoint de grupo (medido:

@@ -63,7 +63,7 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
   return (
     <Secao
       titulo="Sinais automáticos"
-      sub="As 12 regras avaliadas contra os dados deste cliente, agora."
+      sub={`As ${sinais.length} regras avaliadas contra os dados deste cliente, agora.`}
       acao={
         <span className={cn("selo", ativos > 0 ? "selo-bom" : "")}>
           {ativos} {ativos === 1 ? "gatilho ativo" : "gatilhos ativos"}

@@ -265,7 +265,7 @@ export async function clientesComExcedente(
   const espelho = await estadoDoEspelho();
   if (!espelho.horasConfiavel) {
     throw new Error(
-      `Espelho incompleto (${espelho.incompletas.join(", ")}) — a fila de excedente não pode ser ` +
+      `Espelho incompleto (${espelho.barramHoras.join(", ")}) — a fila de excedente não pode ser ` +
         `calculada sem risco de apontar o cliente errado.`,
     );
   }

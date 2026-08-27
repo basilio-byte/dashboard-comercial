@@ -88,7 +88,7 @@ export async function amostraDeValidacao(limite = 20): Promise<AmostraValidacao>
     return {
       linhas: [],
       bloqueio:
-        `O espelho está incompleto (${espelho.incompletas.join(", ")}). Conferir saldo agora ` +
+        `Faltam carregar: ${espelho.barramHoras.join(", ")}. Conferir saldo agora ` +
         `mediria a carga, não o cálculo — uma reserva que ainda não foi carregada aparece como ` +
         `hora não consumida, e o saldo sai alto de propósito errado.`,
       analisados: 0,

@@ -20,14 +20,30 @@ export function Pulso({
   ultimaEscritaISO,
   janelaEmAndamento,
   pendentes,
+  fundos,
   intervaloMs = 15_000,
 }: {
   ultimaEscritaISO: string | null;
   janelaEmAndamento: { entidade: string; janela: string } | null;
   pendentes: number;
+  /** Entidades com o fundo do histórico alcançado. Completo exige as cinco. */
+  fundos: number;
   intervaloMs?: number;
 }) {
   const router = useRouter();
+  /**
+   * ⚠ `pendentes === 0` NÃO é completude, e o selo verde dizia que era.
+   *
+   * Zero pendentes significa "nenhuma janela ABERTA está pendente" — e no
+   * primeiro minuto de carga não existe janela nenhuma além da corrente. O
+   * estado inicial e o estado final produziam o mesmo selo verde "carga
+   * completa", e o auto-refresh parava junto, congelando a tela na mentira.
+   *
+   * Completo é a regra do agendador: nada pendente **e** o fundo alcançado nas
+   * cinco entidades — o que só se sabe depois de seis janelas vazias seguidas,
+   * porque a API não devolve os registros em ordem.
+   */
+  const completa = pendentes === 0 && fundos >= 5;
   /**
    * ⚠ Começa NULO, não em `Date.now()`.
    *
@@ -50,10 +66,13 @@ export function Pulso({
 
   // Recarrega os dados do servidor enquanto houver o que carregar.
   useEffect(() => {
-    if (pendentes === 0) return;
+    // Continua atualizando enquanto a carga não estiver COMPLETA — não só
+    // enquanto houver janela pendente. Parar em `pendentes === 0` congelava a
+    // tela no começo da carga, que é quando ela mais precisa se mover.
+    if (completa) return;
     const t = setInterval(() => router.refresh(), intervaloMs);
     return () => clearInterval(t);
-  }, [pendentes, intervaloMs, router]);
+  }, [completa, intervaloMs, router]);
 
   if (!ultimaEscritaISO) {
     return (
@@ -67,20 +86,15 @@ export function Pulso({
   // Antes de montar não há relógio de cliente: mostra o estado sem o contador,
   // igual no servidor e no navegador.
   if (agora === null) {
-    return (
-      <span className="selo">
-        {pendentes === 0 ? "carga completa" : "verificando…"}
-      </span>
-    );
+    return <span className="selo">{completa ? "carga completa" : "verificando…"}</span>;
   }
 
   const segundos = Math.max(0, Math.round((agora - Date.parse(ultimaEscritaISO)) / 1000));
   // Duas batidas do ciclo de escrita já seriam muito: uma janela grande grava a
   // cada página, e o limitador espaça as requisições em ~2s.
   const vivo = segundos < 90;
-  const concluido = pendentes === 0;
 
-  if (concluido) {
+  if (completa) {
     return (
       <span className="selo selo-bom">
         <CircleCheck size={12} aria-hidden />

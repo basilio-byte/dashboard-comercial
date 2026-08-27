@@ -18,10 +18,20 @@ export async function SecaoValidacao() {
       <div>
         <h2 className="text-[17px] font-semibold tracking-tight">Validação do saldo de horas</h2>
         <p className="mt-1 max-w-3xl text-[14.5px] leading-relaxed text-[var(--tinta-2)]">
-          O saldo é <strong className="font-semibold text-[var(--tinta)]">derivado</strong> (cota do
-          plano menos as horas que o Conexa marcou como abatidas), com o ciclo ancorado na data de
-          contratação. Esta tela existe para conferir esse número contra a tela do Conexa, cliente
-          por cliente.
+          O saldo é <strong className="font-semibold text-[var(--tinta)]">derivado</strong>: a cota
+          do <strong>contrato</strong> (com a do plano de padrão) menos as horas que o Conexa
+          marcou como abatidas, com o ciclo ancorado na data de contratação.{" "}
+          <strong className="font-semibold text-[var(--tinta)]">
+            E ele não fecha para quem comprou pacote.
+          </strong>{" "}
+          Medido em 2026-08-27: as horas do pacote vêm de{" "}
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
+            recurringSales.packageId
+          </code>
+          , e <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code>{" "}
+          responde <strong>404 por permissão</strong> — não há caminho pela API. Esta tela serve
+          como <strong>diagnóstico</strong>; ela não valida o saldo, porque nenhuma conferência
+          pode.
         </p>
       </div>
 
@@ -30,18 +40,22 @@ export async function SecaoValidacao() {
           se dois gatilhos ligam — não se distinguia do resto. */}
       <div className="grid gap-3 sm:grid-cols-3">
         <Instrucao n={1} titulo="Como conferir">
-          Para cada linha, abrir o cliente no Conexa, olhar o pacote de horas do ciclo indicado e
-          comparar o <strong>saldo</strong>. Anotar apenas se bate ou não — a diferença exata importa
-          menos que o acerto do sinal.
+          Para cada linha <strong>sem pacote recorrente</strong>, abrir o cliente no Conexa e
+          comparar o <strong>saldo</strong> do ciclo indicado. Anotar apenas se bate ou não — a
+          diferença exata importa menos que o acerto do sinal. Linhas com cota inconsistente não
+          são conferíveis: a lacuna é nossa, não do cálculo.
         </Instrucao>
         <Instrucao n={2} titulo="Critério de aprovação">
           100% de concordância no <strong>sinal do gatilho</strong>. Errar 30 minutos num saldo de
           20h é irrelevante; o que não pode é o derivado dizer &quot;abaixo do limiar&quot; com o
           Conexa dizendo &quot;acima&quot;.
         </Instrucao>
-        <Instrucao n={3} titulo="Reprovar é resultado válido">
-          Se não bater, as regras de saldo (2 e 9) ficam desligadas e a lacuna é documentada com
-          números — em vez de o sistema ofertar pacote para quem tem 20h sobrando.
+        <Instrucao n={3} titulo="Já estão desligadas">
+          As regras 2 e 9 <strong>não estão esperando este veredito</strong> — estão desligadas
+          desde 2026-08-27, por 404 de permissão em{" "}
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code>.
+          Voltam a ser discutíveis quando o admin do Conexa liberar o endpoint. Melhor desligado
+          que ofertando pacote para quem tem 20h sobrando.
         </Instrucao>
       </div>
 
@@ -57,6 +71,7 @@ export async function SecaoValidacao() {
             titulo={
               <>
                 {amostra.linhas.length} linhas, de {amostra.comCota} clientes com cota
+                <span className="text-[var(--tinta-3)]"> · diagnóstico, não validação</span>
                 <span className="text-[var(--tinta-3)]">
                   {" "}
                   · priorizadas as que tiveram movimento no ciclo

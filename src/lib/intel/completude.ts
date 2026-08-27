@@ -39,7 +39,22 @@ export interface EstadoEspelho {
   receitaConfiavel: boolean;
   /** Dá para apresentar consumo de horas? Exige contratos E reservas completos. */
   horasConfiavel: boolean;
+  /** Toda entidade incompleta, para o aviso geral de completude. */
   incompletas: Entidade[];
+  /**
+   * ⚠ QUAIS entidades barram CADA portão — não a lista geral.
+   *
+   * As mensagens de bloqueio interpolavam `incompletas` inteira, então a fila de
+   * excedente dizia "Espelho incompleto (customers, charges, sales, bookings)"
+   * quando só `bookings` a barrava. Três entidades inocentes acusadas, e quem
+   * lesse iria empurrar carga de `sales` — que não destrava portão nenhum — para
+   * resolver um bloqueio de reservas.
+   *
+   * Culpa errada num aviso de bloqueio é pior que aviso genérico: manda a pessoa
+   * trabalhar no lugar errado com confiança.
+   */
+  barramHoras: Entidade[];
+  barramReceita: Entidade[];
 }
 
 const CONTADOR: Record<Entidade, () => Promise<number>> = {
@@ -108,11 +123,15 @@ export async function estadoDoEspelho(): Promise<EstadoEspelho> {
   const incompletas = entidades.filter((e) => !e.completa).map((e) => e.entidade);
   const completa = (e: Entidade) => entidades.find((x) => x.entidade === e)!.completa;
 
+  const barram = (deps: Entidade[]) => deps.filter((e) => !completa(e));
+
   return {
     entidades,
     receitaConfiavel: completa("customers") && completa("charges"),
     horasConfiavel: completa("contracts") && completa("bookings"),
     incompletas,
+    barramHoras: barram(["contracts", "bookings"]),
+    barramReceita: barram(["customers", "charges"]),
   };
 }
 
