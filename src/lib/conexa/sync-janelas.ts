@@ -138,11 +138,40 @@ export async function sincronizarJanela(
   const def = ENTIDADES[entidade];
   const { de, ate } = limitesDaJanela(janela, def.formato);
 
-  const registro = await prisma.syncWindow.upsert({
+  /**
+   * ⚠ Uma janela JÁ CONCLUÍDA não volta para EM_ANDAMENTO ao ser revisitada.
+   *
+   * Este era o defeito mais caro do sistema, e ficou invisível por semanas
+   * porque só aparece DURANTE a execução. O incremental reprocessa as janelas
+   * recentes a cada 30 minutos; ao começar, isto rebaixava o status, o selo de
+   * completude caía, `horasConfiavel` virava falso — e **o Radar bloqueava com
+   * "a fila ainda não pode ser calculada"**.
+   *
+   * Ou seja: a cada meia hora o produto ficava cego por alguns minutos, e a
+   * mensagem na tela culpava o espelho por estar incompleto quando ele estava
+   * completo e apenas sendo atualizado.
+   *
+   * A distinção que faltava: **carregar pela primeira vez** e **reconferir o
+   * que já está carregado** são coisas diferentes. Na primeira, incompleto é
+   * verdade. Na segunda, o dado está lá — está só sendo refrescado.
+   *
+   * Se a revisita morrer no meio, a janela segue CONCLUIDA com dado levemente
+   * velho, que é melhor do que cegar a fila. O `catch` abaixo continua marcando
+   * FALHOU em erro de verdade.
+   */
+  const existente = await prisma.syncWindow.findUnique({
     where: { entidade_janela: { entidade, janela } },
-    create: { entidade, janela, status: "EM_ANDAMENTO", iniciadaEm: new Date() },
-    update: { status: "EM_ANDAMENTO", iniciadaEm: new Date(), erro: null },
+    select: { status: true, offset: true, registros: true },
   });
+  const revisita = existente?.status === "CONCLUIDA";
+
+  const registro = revisita
+    ? existente!
+    : await prisma.syncWindow.upsert({
+        where: { entidade_janela: { entidade, janela } },
+        create: { entidade, janela, status: "EM_ANDAMENTO", iniciadaEm: new Date() },
+        update: { status: "EM_ANDAMENTO", iniciadaEm: new Date(), erro: null },
+      });
 
   let offset = registro.offset;
   /**
@@ -180,14 +209,30 @@ export async function sincronizarJanela(
       // Progresso gravado DEPOIS da escrita: morrer entre as duas coisas
       // reprocessa a página, o que o upsert torna inofensivo. O contrário
       // pularia registros em silêncio.
-      await prisma.syncWindow.update({
-        where: { entidade_janela: { entidade, janela } },
-        data: { offset, registros },
-      });
+      //
+      // ⚠ Só na primeira carga. Numa REVISITA, gravar progresso parcial faria
+      // duas coisas erradas: deixaria `offset > 0` numa janela CONCLUIDA — e a
+      // próxima varredura retomaria do meio em vez de reconferir do começo, que
+      // é a propriedade que torna a janela verificável — e faria a contagem de
+      // "lidos" despencar na tela enquanto a revisita anda. A revisita é barata
+      // e idempotente: não precisa retomar.
+      if (!revisita) {
+        await prisma.syncWindow.update({
+          where: { entidade_janela: { entidade, janela } },
+          data: { offset, registros },
+        });
+      }
 
       paginas++;
       if (opts.signal?.aborted || (opts.maxPaginas && paginas >= opts.maxPaginas)) {
-        return { entidade, janela, status: "EM_ANDAMENTO", registros };
+        // Revisita interrompida deixa a janela como estava: completa, com o
+        // dado de antes. Interromper uma reconferência não desfaz a carga.
+        return {
+          entidade,
+          janela,
+          status: revisita ? "CONCLUIDA" : "EM_ANDAMENTO",
+          registros: revisita ? existente!.registros : registros,
+        };
       }
     }
 
@@ -200,11 +245,20 @@ export async function sincronizarJanela(
     return { entidade, janela, status: "CONCLUIDA", registros };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // ⚠ Revisita que falha NÃO derruba a janela para FALHOU: o dado carregado
+    // continua lá e continua completo. Marcar falha aqui cegaria a fila por
+    // causa de um erro transitório numa RECONFERÊNCIA — trocar dado bom por
+    // nenhum dado. O erro fica registrado, o selo fica de pé.
     await prisma.syncWindow.update({
       where: { entidade_janela: { entidade, janela } },
-      data: { status: "FALHOU", erro: msg },
+      data: revisita ? { erro: msg } : { status: "FALHOU", erro: msg },
     });
-    return { entidade, janela, status: "FALHOU", registros };
+    return {
+      entidade,
+      janela,
+      status: revisita ? "CONCLUIDA" : "FALHOU",
+      registros: revisita ? existente!.registros : registros,
+    };
   }
 }
 

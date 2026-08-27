@@ -28,10 +28,22 @@ export function Pulso({
   intervaloMs?: number;
 }) {
   const router = useRouter();
-  const [agora, setAgora] = useState(() => Date.now());
+  /**
+   * ⚠ Começa NULO, não em `Date.now()`.
+   *
+   * Componente de cliente também é renderizado no servidor para o HTML
+   * inicial. Semeando com `Date.now()`, o servidor escrevia "há 12s" e o
+   * cliente hidratava com "há 13s" — texto diferente, e o React derrubava a
+   * hidratação com o erro #418, visto no console da produção em 2026-08-27.
+   *
+   * Com `null`, servidor e cliente concordam no primeiro render (o selo não
+   * mostra o contador), e o relógio começa a andar depois de montar.
+   */
+  const [agora, setAgora] = useState<number | null>(null);
 
   // Cronômetro local: 1s. Não bate no servidor, só faz o número andar.
   useEffect(() => {
+    setAgora(Date.now());
     const t = setInterval(() => setAgora(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
@@ -48,6 +60,16 @@ export function Pulso({
       <span className="selo">
         <CirclePause size={12} aria-hidden />
         nenhuma janela iniciada
+      </span>
+    );
+  }
+
+  // Antes de montar não há relógio de cliente: mostra o estado sem o contador,
+  // igual no servidor e no navegador.
+  if (agora === null) {
+    return (
+      <span className="selo">
+        {pendentes === 0 ? "carga completa" : "verificando…"}
       </span>
     );
   }
