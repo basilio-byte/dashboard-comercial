@@ -218,7 +218,6 @@ export interface FilaExcedente {
 
 export async function clientesComExcedente(
   ref: Date = nowInAppTz(),
-  opts: { limite?: number } = {},
 ): Promise<FilaExcedente> {
   // ⚠ GATE. Esta função é a porta de entrada da fila que vira task no ClickUp,
   // e era a única do caminho sem selo de completude — a proteção existia só
@@ -232,45 +231,166 @@ export async function clientesComExcedente(
     );
   }
 
-  const limite = opts.limite ?? 500;
+  void ref;
+  const refDia = keyToUtcDate(todayKey());
 
-  // Duas etapas, porque o espelho NÃO tem chave estrangeira entre contrato e
-  // cliente (ver o comentário no schema): a relação não existe para o Prisma
-  // filtrar num join. Buscamos os contratos e aplicamos o gate de elegibilidade
-  // com um único `findMany` de clientes — ainda antes do laço caro.
+  // ── Três consultas para a base inteira, não três por cliente ──────────────
+  //
+  // ⚠ A versão anterior chamava `horasDoCliente` num laço, o que dá 3 consultas
+  // por cliente. Para caber num request ela cortava em 200 — e o corte era por
+  // `conexaId` crescente, ou seja, **os 200 clientes mais antigos**. Com 5.244
+  // ativos, a tela respondia "quem procurar hoje" sobre menos de 4% da base, e
+  // sempre a mesma fatia. A resposta certa podia estar fora dela para sempre.
+  //
+  // O gargalo era o N+1, não o volume: as reservas de todos os ciclos de todos
+  // os clientes cabem numa consulta só, e a matemática é pura. Agora não há
+  // corte.
   const contratos = await prisma.contract.findMany({
-    where: { isActive: true, planConexaId: { not: null }, customerConexaId: { not: null } },
-    select: { customerConexaId: true },
-    distinct: ["customerConexaId"],
-    // Sem `orderBy` o Postgres não garante QUAIS registros vêm — a fila do
-    // vendedor mudaria entre execuções sem nada ter mudado no negócio.
-    orderBy: { customerConexaId: "asc" },
+    where: {
+      isActive: true,
+      planConexaId: { not: null },
+      customerConexaId: { not: null },
+      // `isActive` herda o atraso do operador em baixar a flag; `endDate` é o
+      // fato — contrato encerrado não ancora ciclo.
+      OR: [{ endDate: null }, { endDate: { gte: refDia } }],
+    },
+    orderBy: [{ customerConexaId: "asc" }, { startDate: "asc" }],
   });
-  const ids = contratos.map((c) => c.customerConexaId!).filter((x) => x !== null);
+  if (!contratos.length) {
+    return { itens: [], ambiguos: 0, truncado: false, analisados: 0 };
+  }
 
   // Gate de elegibilidade (ADR-0010): inativo ou bloqueado nunca vira sinal.
   const elegiveis = await prisma.customer.findMany({
-    where: { conexaId: { in: ids }, isActive: true, isBlocked: false },
+    where: {
+      conexaId: { in: [...new Set(contratos.map((c) => c.customerConexaId!))] },
+      isActive: true,
+      isBlocked: false,
+    },
     select: { conexaId: true, name: true },
-    orderBy: { conexaId: "asc" },
   });
   const nomePor = new Map(elegiveis.map((c) => [c.conexaId, c.name]));
 
-  const truncado = elegiveis.length > limite;
-  const alvos = elegiveis.slice(0, limite).map((c) => ({ customerConexaId: c.conexaId }));
+  const planos = await prisma.plan.findMany({
+    where: { conexaId: { in: [...new Set(contratos.map((c) => c.planConexaId!))] } },
+  });
+  const planoPorId = new Map(planos.map((p) => [p.conexaId, p]));
 
+  const porCliente = new Map<number, typeof contratos>();
+  for (const c of contratos) {
+    if (!nomePor.has(c.customerConexaId!)) continue; // inelegível
+    const lista = porCliente.get(c.customerConexaId!) ?? [];
+    lista.push(c);
+    porCliente.set(c.customerConexaId!, lista);
+  }
+
+  // Uma consulta de reservas cobrindo a janela mais ampla de todos os ciclos.
+  const bordas: number[] = [];
+  for (const lista of porCliente.values()) {
+    for (const c of lista) {
+      if (!c.startDate) continue;
+      const cs = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS);
+      const v = cicloVigente(c.startDate, refDia);
+      if (cs.length) bordas.push(cs[0]!.inicio.getTime());
+      if (v) bordas.push(v.fimExclusivo.getTime());
+    }
+  }
+  const reservas = bordas.length
+    ? await prisma.roomBooking.findMany({
+        where: {
+          customerConexaId: { in: [...porCliente.keys()] },
+          dataLocal: { gte: new Date(Math.min(...bordas)), lt: new Date(Math.max(...bordas)) },
+        },
+        select: {
+          customerConexaId: true,
+          status: true,
+          isActive: true,
+          cancellationReason: true,
+          horas: true,
+          dataLocal: true,
+        },
+      })
+    : [];
+
+  const reservasPor = new Map<number, ReservaParaConsumo[]>();
+  for (const r of reservas) {
+    if (r.customerConexaId === null) continue;
+    const lista = reservasPor.get(r.customerConexaId) ?? [];
+    lista.push({
+      status: r.status,
+      isActive: r.isActive,
+      cancellationReason: r.cancellationReason,
+      horas: r.horas?.toString() ?? null,
+      dataLocal: r.dataLocal,
+    });
+    reservasPor.set(r.customerConexaId, lista);
+  }
+
+  // ── Matemática pura, em memória ───────────────────────────────────────────
   const itens: FilaExcedente["itens"] = [];
   let ambiguos = 0;
 
-  for (const { customerConexaId } of alvos) {
-    if (customerConexaId === null) continue;
-    const horas = await horasDoCliente(customerConexaId, ref);
-    if (horas.atribuicaoAmbigua) {
+  for (const [customerConexaId, lista] of porCliente) {
+    const doCliente = reservasPor.get(customerConexaId) ?? [];
+
+    const comCota = lista.filter((c) => {
+      const p = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
+      return p?.horasInclusasMes != null;
+    });
+    // Ambíguo com mais de um contrato COM cota: a reserva não diz de qual balde
+    // a hora saiu, e inventar atribuição é pior que ficar de fora.
+    if (comCota.length > 1) {
       ambiguos++;
-      continue; // não inventa atribuição: fica de fora e é contado
+      continue;
     }
-    if (!horas.sinal?.recorrente) continue;
-    itens.push({ customerConexaId, nome: nomePor.get(customerConexaId) ?? null, horas });
+
+    const blocos: HorasDoContrato[] = [];
+    for (const c of lista) {
+      const plano = c.planConexaId !== null ? planoPorId.get(c.planConexaId) : undefined;
+      const concedido =
+        plano?.horasInclusasMes != null ? money(plano.horasInclusasMes.toString()) : null;
+      if (!c.startDate) continue;
+
+      const fechados = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS).map((j) =>
+        consolidarCiclo(j, doCliente, concedido),
+      );
+      const vigente = cicloVigente(c.startDate, refDia);
+      blocos.push({
+        contratoConexaId: c.conexaId,
+        planoNome: plano?.name ?? null,
+        concedido,
+        inicio: c.startDate,
+        cicloAtual: vigente ? consolidarCiclo(vigente, doCliente, concedido) : null,
+        fechados,
+        // Só ciclos FECHADOS: o vigente está pela metade, e um estouro "ainda
+        // não acontecido" não é sinal.
+        sinal: fechados.length ? avaliarExcedente(fechados) : null,
+      });
+    }
+
+    const sinal =
+      blocos
+        .map((b) => b.sinal)
+        .filter((s): s is SinalExcedente => s !== null)
+        .sort((a, b) => Number(b.horasExcedentes.minus(a.horasExcedentes)))[0] ?? null;
+    if (!sinal?.recorrente) continue;
+
+    let concedidoTotal: Money | null = null;
+    for (const b of blocos) {
+      if (b.concedido !== null) concedidoTotal = (concedidoTotal ?? money(0)).plus(b.concedido);
+    }
+
+    itens.push({
+      customerConexaId,
+      nome: nomePor.get(customerConexaId) ?? null,
+      horas: {
+        contratos: blocos,
+        semContrato: false,
+        atribuicaoAmbigua: false,
+        concedidoTotal,
+        sinal,
+      },
+    });
   }
 
   return {
@@ -278,7 +398,8 @@ export async function clientesComExcedente(
       Number(b.horas.sinal!.horasExcedentes.minus(a.horas.sinal!.horasExcedentes)),
     ),
     ambiguos,
-    truncado,
-    analisados: alvos.length,
+    // Não existe mais corte: a fila cobre a base elegível inteira.
+    truncado: false,
+    analisados: porCliente.size,
   };
 }

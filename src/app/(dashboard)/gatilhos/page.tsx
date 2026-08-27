@@ -1,6 +1,6 @@
-import { CircleCheck, CircleDashed, Clock, Ban, type LucideIcon } from "lucide-react";
+import { CircleCheck, Clock, Ban, HelpCircle, Hammer, type LucideIcon } from "lucide-react";
 import { estadoDoEspelho } from "@/lib/intel/completude";
-import { Cabecalho, Faixa, Secao } from "@/components/Cartao";
+import { Cabecalho, Faixa, Nota, Secao } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -13,12 +13,16 @@ export const dynamic = "force-dynamic";
  * desligado" têm a mesma aparência — e a segunda situação, silenciosa, é como
  * uma automação morre sem ninguém perceber.
  *
- * "Gatilho" é a palavra do documento de especificação do cliente. Usar o
- * vocabulário dele, e não o de um dashboard financeiro, é parte de o sistema
- * ser deste negócio.
+ * ⚠ Os estados separam DE QUEM é a próxima ação. A versão anterior jogava tudo
+ * em "não implementado", o que escondia a diferença que importa: metade espera
+ * uma decisão do cliente e a outra metade espera só código. Com a carga
+ * completa em 2026-08-27, cinco gatilhos passaram de "falta dado" para "falta
+ * implementar" — e isso ficava invisível numa tela com dois baldes.
+ *
+ * "Gatilho" é a palavra do documento de especificação do cliente.
  */
 
-type Estado = "ligado" | "aguardando" | "bloqueado" | "pendente";
+type Estado = "ligado" | "aguardando" | "pronto" | "definicao" | "validacao";
 
 interface Gatilho {
   n: number | null;
@@ -29,7 +33,7 @@ interface Gatilho {
   nota: string;
 }
 
-function gatilhos(horasConfiavel: boolean): Gatilho[] {
+function gatilhos(horasConfiavel: boolean, reservasOk: boolean, contratosOk: boolean): Gatilho[] {
   return [
     {
       n: null,
@@ -38,88 +42,88 @@ function gatilhos(horasConfiavel: boolean): Gatilho[] {
       oferta: "upgrade de plano",
       estado: horasConfiavel ? "ligado" : "aguardando",
       nota: horasConfiavel
-        ? "ativo — único gatilho rodando hoje"
+        ? "ativo — roda sobre a base elegível inteira, sem corte"
         : "aguardando a carga de reservas e contratos terminar",
-    },
-    {
-      n: 1,
-      nome: "Fiscal completa 11 meses",
-      condicao: "contrato de Endereço Fiscal chega a 11 meses",
-      oferta: "plano Bianual",
-      estado: "pendente",
-      nota: "motor de regras não implementado · falta definir se o relógio começa em startDate ou fidelityDate",
-    },
-    {
-      n: 2,
-      nome: "Pacote de horas acabando",
-      condicao: "saldo do pacote abaixo do limiar",
-      oferta: "novo pacote",
-      estado: "bloqueado",
-      nota: "depende da validação do saldo contra a tela do Conexa — ver Confiança",
-    },
-    {
-      n: 3,
-      nome: "Padrão de compra irregular",
-      condicao: "compra caindo mês a mês",
-      oferta: "novo pacote",
-      estado: "bloqueado",
-      nota: '"irregular" ainda não tem definição numérica — quantos meses, qual queda?',
     },
     {
       n: 4,
       nome: "Avulso com uso alto",
       condicao: "só compra hora avulsa, mas passou de 5h no mês",
-      oferta: "pacote de horas, mostrando a economia",
-      estado: "pendente",
-      nota: "o gatilho é sólido; a economia depende de uma tabela de preços que é cadastro manual",
+      oferta: "pacote de horas",
+      estado: reservasOk ? "pronto" : "aguardando",
+      nota: "o dado necessário está carregado · a economia vs. avulso exige uma tabela de preços que é cadastro manual — dá para disparar sem ela, só sem o número da economia",
     },
     {
       n: 5,
       nome: "Primeira reserva de sala",
       condicao: "primeira reserva do cliente, na data",
       oferta: "Endereço Fiscal + SeaBox",
-      estado: "pendente",
-      nota: "exige a carga completa de reservas — sem ela, todo cliente antigo parece estreante",
+      estado: reservasOk ? "pronto" : "aguardando",
+      nota: "desbloqueado pela carga completa de reservas — antes, sem o histórico inteiro, todo cliente antigo parecia estreante",
     },
     {
       n: 6,
       nome: "Privativa completa 1 mês",
       condicao: "1 mês do início do contrato de sala privativa",
       oferta: "Registro de Marca",
-      estado: "pendente",
-      nota: "motor de regras não implementado",
+      estado: contratosOk ? "pronto" : "aguardando",
+      nota: "marco de data puro sobre contrato — `contratoDesde` já está consolidado no perfil",
     },
     {
       n: 7,
       nome: "Privativa completa 2 meses",
       condicao: "2 meses do início do contrato",
       oferta: "SeaBox como benefício",
-      estado: "pendente",
-      nota: "se o SeaBox é cortesia e não vira venda, o sistema nunca saberá que o cliente já recebeu",
-    },
-    {
-      n: 8,
-      nome: "Privativa até 6 meses",
-      condicao: "até o 6º mês do contrato",
-      oferta: "Panteão",
-      estado: "pendente",
-      nota: 'produto existe (3380/3381) · falta definir se "até o 6º mês" é aniversário ou janela aberta',
-    },
-    {
-      n: 9,
-      nome: "Pacote abaixo de 5h",
-      condicao: "saldo do pacote menor que 5h",
-      oferta: "novo pacote",
-      estado: "bloqueado",
-      nota: "mesma dependência do gatilho 2 — é o mesmo cálculo com outro limiar",
+      estado: contratosOk ? "pronto" : "aguardando",
+      nota: "dispara, mas SEM supressão: se o SeaBox é cortesia e não vira venda, o sistema não sabe que o cliente já recebeu e vai reofertar",
     },
     {
       n: 10,
       nome: "Litoral reserva sala",
       condicao: "plano de Endereço Fiscal SEM horas inclusas + fez reserva",
       oferta: "Pacote de Horas ou upgrade para Batial (2h/mês)",
-      estado: "pendente",
-      nota: "desbloqueado: o tier vem da cota do plano, não do nome — Batial 2h confirmado na API",
+      estado: reservasOk && contratosOk ? "pronto" : "aguardando",
+      nota: "o tier vem da cota do plano, não do nome do produto — Batial 2h confirmado na API",
+    },
+    {
+      n: 1,
+      nome: "Fiscal completa 11 meses",
+      condicao: "contrato de Endereço Fiscal chega a 11 meses",
+      oferta: "plano Bianual",
+      estado: "definicao",
+      nota: "o relógio começa em `startDate` ou `fidelityDate`? A diferença muda quem entra na fila",
+    },
+    {
+      n: 3,
+      nome: "Padrão de compra irregular",
+      condicao: "compra caindo mês a mês",
+      oferta: "novo pacote",
+      estado: "definicao",
+      nota: '"irregular" não tem definição numérica — quantos meses seguidos, e qual queda conta?',
+    },
+    {
+      n: 8,
+      nome: "Privativa até 6 meses",
+      condicao: "até o 6º mês do contrato",
+      oferta: "Panteão",
+      estado: "definicao",
+      nota: 'produto existe (3380/3381) · "até o 6º mês" é aniversário ou janela aberta?',
+    },
+    {
+      n: 2,
+      nome: "Pacote de horas acabando",
+      condicao: "saldo do pacote abaixo do limiar",
+      oferta: "novo pacote",
+      estado: "validacao",
+      nota: "o saldo é derivado, não lido da API — precisa bater contra a tela do Conexa antes de virar oferta. Ver Confiança",
+    },
+    {
+      n: 9,
+      nome: "Pacote abaixo de 5h",
+      condicao: "saldo do pacote menor que 5h",
+      oferta: "novo pacote",
+      estado: "validacao",
+      nota: "mesma dependência do gatilho 2 — é o mesmo cálculo com outro limiar",
     },
   ];
 }
@@ -131,41 +135,56 @@ function gatilhos(horasConfiavel: boolean): Gatilho[] {
  */
 const ESTILO: Record<
   Estado,
-  { classeSelo: string; classeAresta: string; Icone: LucideIcon; rotulo: string }
+  { classeSelo: string; classeAresta: string; Icone: LucideIcon; rotulo: string; deQuem: string }
 > = {
   ligado: {
     classeSelo: "selo-bom",
     classeAresta: "bg-[var(--bom)]",
     Icone: CircleCheck,
     rotulo: "ligado",
+    deQuem: "rodando",
   },
   aguardando: {
     classeSelo: "selo-atencao",
     classeAresta: "bg-[var(--atencao)]",
     Icone: Clock,
     rotulo: "aguardando dado",
+    deQuem: "espera a carga",
   },
-  bloqueado: {
+  pronto: {
+    classeSelo: "selo-info",
+    classeAresta: "bg-[var(--acento)]",
+    Icone: Hammer,
+    rotulo: "pronto para implementar",
+    deQuem: "espera código",
+  },
+  definicao: {
+    classeSelo: "",
+    classeAresta: "bg-[var(--tinta-3)]",
+    Icone: HelpCircle,
+    rotulo: "falta definição",
+    deQuem: "espera o cliente",
+  },
+  validacao: {
     classeSelo: "selo-critico",
     classeAresta: "bg-[var(--critico)]",
     Icone: Ban,
-    rotulo: "bloqueado",
-  },
-  pendente: {
-    classeSelo: "",
-    classeAresta: "bg-[var(--linha)]",
-    Icone: CircleDashed,
-    rotulo: "não implementado",
+    rotulo: "falta validar o saldo",
+    deQuem: "espera conferência",
   },
 };
 
-const ORDEM_RESUMO: Estado[] = ["ligado", "aguardando", "bloqueado", "pendente"];
+const ORDEM_RESUMO: Estado[] = ["ligado", "pronto", "definicao", "validacao"];
 
 export default async function Gatilhos() {
   const espelho = await estadoDoEspelho();
-  const lista = gatilhos(espelho.horasConfiavel);
+  const completa = (e: string) =>
+    espelho.entidades.find((x) => x.entidade === e)?.completa ?? false;
+
+  const lista = gatilhos(espelho.horasConfiavel, completa("bookings"), completa("contracts"));
   const contagem = (e: Estado) => lista.filter((g) => g.estado === e).length;
   const ligados = contagem("ligado");
+  const prontos = contagem("pronto");
 
   return (
     <>
@@ -185,11 +204,11 @@ export default async function Gatilhos() {
       />
 
       <div className="space-y-8">
-        {/* Placar por estado: responde "quanto do motor está de pé?" antes de
-            qualquer leitura item a item. */}
+        {/* Placar por estado. O que interessa não é "quantos faltam", é DE QUEM
+            é a próxima ação em cada um. */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {ORDEM_RESUMO.map((e) => {
-            const { Icone, rotulo, classeSelo } = ESTILO[e];
+            const { Icone, rotulo, classeSelo, deQuem } = ESTILO[e];
             const n = contagem(e);
             return (
               <div key={e} className="cartao px-3.5 py-3">
@@ -207,19 +226,26 @@ export default async function Gatilhos() {
                 >
                   {n}
                 </div>
+                <div className="mt-1 text-[12px] text-[var(--tinta-3)]">{deQuem}</div>
               </div>
             );
           })}
         </div>
 
-        <Faixa tom="info">
-          Nenhum gatilho cria task no ClickUp ainda — <strong>a camada de disparo não existe</strong>.
-          O que roda hoje aparece no Radar, para o vendedor decidir o que fazer.
-        </Faixa>
+        {prontos > 0 ? (
+          <Faixa tom="info">
+            <strong>
+              {prontos} {prontos === 1 ? "gatilho tem" : "gatilhos têm"} todo o dado necessário
+            </strong>{" "}
+            e espera apenas o motor de regras — que ainda não existe. Nenhum cria task no ClickUp:
+            a camada de disparo não foi construída. O que roda hoje aparece no Radar, para o
+            vendedor decidir o que fazer.
+          </Faixa>
+        ) : null}
 
         <Secao
           titulo="Os gatilhos"
-          sub="Fonte: documento de especificação do cliente, mais um derivado da conversa com o responsável."
+          sub="Agrupados pelo que falta. Fonte: documento de especificação do cliente, mais um derivado da conversa com o responsável."
         >
           <div className="space-y-2">
             {lista.map((g) => {
@@ -236,7 +262,7 @@ export default async function Gatilhos() {
                   />
 
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                    <span className="text-[15.5px] font-semibold">{g.nome}</span>
+                    <span className="text-[14.5px] font-semibold">{g.nome}</span>
                     <span className="selo">
                       {g.n ? `regra ${g.n}` : "pedido do responsável"}
                     </span>
@@ -263,6 +289,16 @@ export default async function Gatilhos() {
             })}
           </div>
         </Secao>
+
+        <Nota>
+          As três perguntas em <strong>falta definição</strong> estão em
+          <code className="mx-1 rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
+            docs/context/perguntas-abertas.md
+          </code>
+          e precisam de resposta do cliente — não há como decidi-las pelo dado. As duas em{" "}
+          <strong>falta validar</strong> dependem de alguém conferir ~20 linhas na tela Confiança
+          contra o Conexa.
+        </Nota>
       </div>
     </>
   );

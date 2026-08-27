@@ -5,6 +5,7 @@ import { formatBRL } from "@/lib/money";
 import { rotuloMes, ultimoMesFechado } from "@/lib/dates";
 import { Procedencia } from "@/components/Procedencia";
 import { SerieMensalDaCarteira } from "./serie-mensal";
+import { MetricasDaCarteira } from "./metricas";
 import { corVariacao, pct } from "@/lib/ui";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { AvisoCompletude, ValorOuLacuna } from "@/components/AvisoCompletude";
@@ -169,6 +170,12 @@ export default async function Carteira({
           <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">plan.hourQuotas</code>
           . &quot;Sem cota&quot; significa plano sem horas inclusas, e não zero hora.
         </Nota>
+
+        <hr className="divisor !mt-10" />
+
+        {/* Métricas exigidas pela especificação do Diego, movidas do Radar:
+            receita é atributo do cliente, não resposta a "quem procurar hoje". */}
+        <MetricasDaCarteira confiavel={espelho.receitaConfiavel} />
 
         <hr className="divisor !mt-10" />
 
