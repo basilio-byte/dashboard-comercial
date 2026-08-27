@@ -3,6 +3,7 @@ import { ArrowUpRight, Inbox } from "lucide-react";
 import { nowInAppTz } from "@/lib/dates";
 import { clientesComExcedente } from "@/lib/intel/horas";
 import { Cabecalho, Faixa, Nota, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
+import { cn } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,9 @@ export default async function Radar() {
                       <th>Motivo</th>
                       <th className="text-right">Horas pagas por fora</th>
                       <th className="text-right">Ciclos</th>
+                      {/* Sugestão do Diego: sem isto a fila mostra o mesmo
+                          cliente todo dia, inclusive para quem já ligou ontem. */}
+                      <th>Último contato</th>
                       <th className="w-8" />
                     </tr>
                   </thead>
@@ -115,6 +119,22 @@ export default async function Radar() {
                         </td>
                         <td className="num text-right text-[var(--tinta-2)]">
                           {i.horas.sinal!.ciclosComEstouro}/{i.horas.sinal!.ciclosConclusivos}
+                        </td>
+                        <td className="whitespace-nowrap">
+                          {i.ultimoContato ? (
+                            <span
+                              className={cn(
+                                "selo",
+                                i.ultimoContato.resultado === "RECUSOU" && "selo-critico",
+                                i.ultimoContato.resultado === "FECHOU" && "selo-bom",
+                              )}
+                              title={`${i.ultimoContato.quem} · ${i.ultimoContato.resultado.toLowerCase().replace("_", " ")}`}
+                            >
+                              {diasDesde(i.ultimoContato.contatoEm)} · {i.ultimoContato.quem}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--tinta-3)]">nunca</span>
+                          )}
                         </td>
                         <td className="pr-3 text-right">
                           <Link
@@ -165,4 +185,13 @@ export default async function Radar() {
       </div>
     </>
   );
+}
+
+/** "hoje", "3 dias", "2 meses" — o vendedor lê distância, não data. */
+function diasDesde(d: Date): string {
+  const n = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86_400_000));
+  if (n === 0) return "hoje";
+  if (n === 1) return "1 dia";
+  if (n < 60) return `${n} dias`;
+  return `${Math.floor(n / 30)} meses`;
 }

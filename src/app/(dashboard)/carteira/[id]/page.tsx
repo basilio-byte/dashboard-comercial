@@ -10,6 +10,7 @@ import { estadoDoEspelho } from "@/lib/intel/completude";
 import { horasDoCliente } from "@/lib/intel/horas";
 import { BlocoHoras } from "@/components/Horas";
 import { SinaisAutomaticos } from "./sinais";
+import { Contatos } from "./contatos";
 import { Cartao, Faixa, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 
 export const dynamic = "force-dynamic";
@@ -123,6 +124,8 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
         </section>
 
         <SinaisAutomaticos customerConexaId={conexaId} />
+
+        <Contatos customerConexaId={conexaId} />
 
         <Secao titulo="Receita mês a mês">
           {serie.length === 0 ? (

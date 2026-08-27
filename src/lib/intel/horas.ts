@@ -241,7 +241,13 @@ export async function horasDoCliente(
  * os ciclos não se alinham. Roda no job, não no request.
  */
 export interface FilaExcedente {
-  itens: Array<{ customerConexaId: number; nome: string | null; horas: HorasDoCliente }>;
+  itens: Array<{
+    customerConexaId: number;
+    nome: string | null;
+    horas: HorasDoCliente;
+    /** Último contato registrado à mão, para a fila não repetir quem já foi procurado. */
+    ultimoContato: { contatoEm: Date; quem: string; resultado: string } | null;
+  }>;
   /** Clientes com mais de um contrato com cota — excluídos por ambiguidade. */
   ambiguos: number;
   /** true = o corte foi atingido e a fila está incompleta. */
@@ -416,6 +422,8 @@ export async function clientesComExcedente(
     itens.push({
       customerConexaId,
       nome: nomePor.get(customerConexaId) ?? null,
+      // Preenchido depois do laço, numa consulta só para a fila inteira.
+      ultimoContato: null,
       horas: {
         contratos: blocos,
         semContrato: false,
@@ -426,10 +434,27 @@ export async function clientesComExcedente(
     });
   }
 
+  // ⚠ Último contato, por cliente da fila.
+  //
+  // Sugestão do Diego em 2026-08-27, e o lugar onde ela mais rende: sem isso a
+  // fila mostra o mesmo cliente todo dia, inclusive para quem já ligou ontem —
+  // e o vendedor aprende a ignorá-la. Uma consulta só, sobre os que sobraram.
+  const contatos = itens.length
+    ? await prisma.contato.findMany({
+        where: { customerConexaId: { in: itens.map((i) => i.customerConexaId) } },
+        orderBy: { contatoEm: "desc" },
+        select: { customerConexaId: true, contatoEm: true, quem: true, resultado: true },
+      })
+    : [];
+  const ultimoPor = new Map<number, (typeof contatos)[number]>();
+  for (const c of contatos) if (!ultimoPor.has(c.customerConexaId)) ultimoPor.set(c.customerConexaId, c);
+
   return {
-    itens: itens.sort((a, b) =>
-      Number(b.horas.sinal!.horasExcedentes.minus(a.horas.sinal!.horasExcedentes)),
-    ),
+    itens: itens
+      .map((i) => ({ ...i, ultimoContato: ultimoPor.get(i.customerConexaId) ?? null }))
+      .sort((a, b) =>
+        Number(b.horas.sinal!.horasExcedentes.minus(a.horas.sinal!.horasExcedentes)),
+      ),
     ambiguos,
     // Não existe mais corte: a fila cobre a base elegível inteira.
     truncado: false,

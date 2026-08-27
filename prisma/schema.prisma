@@ -161,8 +161,9 @@ model Customer {
 
   // Só as tabelas DERIVADAS têm relação: elas são nossas, nascem depois dos
   // clientes e o cascade delete é desejável. As de espelho, não — ver Contract.
-  monthly CustomerMonthlyRevenue[]
-  profile CustomerProfile?
+  monthly  CustomerMonthlyRevenue[]
+  profile  CustomerProfile?
+  contatos Contato[]
 
   @@index([companyConexaId])
   @@index([isActive, isBlocked])
@@ -528,4 +529,56 @@ model Reconciliacao {
 
   @@index([mesKey, executadaEm])
   @@map("reconciliacoes")
+}
+
+/// Resultado de um contato. Existe para virar SUPRESSÃO depois: cliente que
+/// recusou não deve receber a mesma oferta no ciclo seguinte.
+enum ResultadoContato {
+  FALOU /// conversou com o cliente
+  SEM_RESPOSTA /// tentou e não conseguiu falar
+  INTERESSADO /// pediu proposta, quer pensar
+  RECUSOU /// disse não — o que mais importa para não reofertar
+  FECHOU /// virou venda
+}
+
+/// CONTATO COM O CLIENTE — registrado à mão pelo vendedor.
+///
+/// Sugestão do Diego em 2026-08-27: *"um campo para informar o último contato e
+/// quem fez"*.
+///
+/// ⚠ É o elo que faltava, e ele fecha um ciclo aberto: o sistema aponta quem
+/// procurar e **nunca fica sabendo que alguém procurou**. Sem isso a fila
+/// repete o mesmo cliente indefinidamente, e o vendedor aprende a ignorá-la —
+/// que é como uma ferramenta de recomendação morre.
+///
+/// É também o §5.4 do documento ("guardar histórico de disparos — cliente,
+/// regra, data — para não repetir a mesma oferta no mesmo ciclo") na versão
+/// MANUAL, que é a que faz sentido enquanto a camada de disparo não existe.
+model Contato {
+  id               String   @id @default(cuid())
+  customerConexaId Int
+  customer         Customer @relation(fields: [customerConexaId], references: [conexaId], onDelete: Cascade)
+
+  /// Quando o contato ACONTECEU. Diferente de `registradoEm` de propósito:
+  /// ninguém registra na hora, e conflatar os dois perde a informação que
+  /// importa para o ciclo da oferta.
+  contatoEm DateTime
+
+  /// Quem falou com o cliente. Texto livre porque **não existe cadastro de
+  /// vendedor** — e um nome digitado por uma pessoa vale mais que um cadastro
+  /// inventado. Vira `user_id` do ClickUp quando o CRM entrar.
+  quem String
+
+  /// Qual sinal motivou o contato: "extra", "1".."10", "métrica", ou nulo
+  /// quando foi por outro motivo.
+  regra     String?
+  resultado ResultadoContato
+  nota      String?
+
+  /// Quem digitou, e quando. Rastro de auditoria, não de negócio.
+  registradoPor String?
+  registradoEm  DateTime @default(now())
+
+  @@index([customerConexaId, contatoEm])
+  @@map("contatos")
 }
