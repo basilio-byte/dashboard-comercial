@@ -130,8 +130,9 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 
 ### Regra 1 — Fiscal 11 meses
 
-25. O relógio começa em **`startDate`** ou em **`fidelityDate`**? Os dois existem e **divergem nos
-    dados reais**.
+25. ~~O relógio começa em `startDate` ou em `fidelityDate`?~~ ✅ **RESPONDIDO em 2026-08-27 pelo
+    dono: `startDate`.** `fidelityDate` é ignorado, mesmo divergindo nos dados reais.
+    Implementado em `src/lib/regras/familias.ts` → `marcoAtingido`.
 26. Se o cliente já renovou, o gatilho conta do **contrato atual** ou da **primeira contratação**?
 27. A oferta de Bianual vale para **todos os tiers**? **Só existem 2 produtos "Bianual" no
     catálogo, ambos SEATECH** — não há Bianual para Simples/Black/Comércio.
@@ -146,7 +147,10 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 
 ### Regra 3 — padrão irregular
 
-33. **Qual é a definição numérica de "irregular"?** Quantos meses de série, e qual queda?
+33. ~~Qual é a definição numérica de "irregular"?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono:
+    "mês a mês"** — queda em meses CONSECUTIVOS. Implementado como `quedaMesAMes`, com
+    `quedasSeguidas` default **2** (o exemplo do próprio documento — 20h, 10h, nada — são três
+    meses e duas quedas seguidas). ⚠ O NÚMERO de quedas continua confirmável: é parâmetro.
 34. "Comprou 20h" é **compra** ou **consumo**? São coisas diferentes e vêm de endpoints diferentes.
 
 ### Regra 4 — avulso com uso alto
@@ -169,8 +173,9 @@ Cada pergunta está marcada com a fase que ela **bloqueia**. Pergunta sem respos
 41. O relógio começa em `startDate` ou em `dateSalesGeneration`?
 42. **O SeaBox da regra 7 é cortesia ou venda?** Se é cortesia e não é registrada no Conexa, o
     sistema **nunca saberá que o cliente já recebeu** e vai reofertar.
-43. **"Até o 6º mês"** é o aniversário de 6 meses, ou uma janela aberta? Se for janela, não é
-    gatilho — precisa de um evento âncora.
+43. ~~"Até o 6º mês" é aniversário ou janela aberta?~~ ✅ **RESPONDIDO em 2026-08-27 pelo dono:
+    ANIVERSÁRIO.** Dispara no marco dos 6 meses, com tolerância para o atraso do job — e não
+    todo dia do 1º ao 6º mês. A diferença é entre uma oferta e cento e oitenta.
 44. Quando "Panteão" será cadastrado no Conexa? Sem `productId`, a regra 8 não existe.
 
 ### Regra 10 — Endereço Litoral

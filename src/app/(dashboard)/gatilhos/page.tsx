@@ -1,4 +1,4 @@
-import { CircleCheck, Clock, Ban, HelpCircle, Hammer, type LucideIcon } from "lucide-react";
+import { CircleCheck, TriangleAlert, Ban, CircleDashed, type LucideIcon } from "lucide-react";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { Cabecalho, Faixa, Nota, Secao } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
@@ -8,130 +8,151 @@ export const dynamic = "force-dynamic";
 /**
  * GATILHOS — o que dispara oferta, e o que ainda não dispara.
  *
- * Esta tela existe por um motivo específico: **fila vazia precisa ser
- * interpretável**. Sem ela, "ninguém tem oportunidade hoje" e "o motor está
- * desligado" têm a mesma aparência — e a segunda situação, silenciosa, é como
- * uma automação morre sem ninguém perceber.
+ * Esta tela existe porque **fila vazia precisa ser interpretável**: sem ela,
+ * "ninguém tem oportunidade hoje" e "o motor está desligado" têm a mesma
+ * aparência, e a segunda é como uma automação morre sem ninguém perceber.
  *
- * ⚠ Os estados separam DE QUEM é a próxima ação. A versão anterior jogava tudo
- * em "não implementado", o que escondia a diferença que importa: metade espera
- * uma decisão do cliente e a outra metade espera só código. Com a carga
- * completa em 2026-08-27, cinco gatilhos passaram de "falta dado" para "falta
- * implementar" — e isso ficava invisível numa tela com dois baldes.
- *
- * "Gatilho" é a palavra do documento de especificação do cliente.
+ * ⚠ Os estados são os de `docs/context/regras-comerciais.md`, que é a análise
+ * de viabilidade do documento do Diego cruzada com o que a Fase 0 mediu contra
+ * a API. Eu cheguei a inventar aqui uma taxonomia paralela ("pronto para
+ * implementar") e ela estava ERRADA em três regras — dizia pronto o que o
+ * repositório já tinha analisado como tendo ressalva concreta. Uma tela que
+ * discorda da análise do próprio projeto é pior que uma tela sem estado.
  */
 
-type Estado = "ligado" | "aguardando" | "pronto" | "definicao" | "validacao";
+type Estado = "ligado" | "viavel" | "ressalva" | "definicao";
 
 interface Gatilho {
-  n: number | null;
+  n: string;
   nome: string;
   condicao: string;
   oferta: string;
+  familia: string;
   estado: Estado;
   nota: string;
 }
 
-function gatilhos(horasConfiavel: boolean, reservasOk: boolean, contratosOk: boolean): Gatilho[] {
+function gatilhos(horasConfiavel: boolean, reservasOk: boolean): Gatilho[] {
   return [
     {
-      n: null,
+      n: "extra",
       nome: "Estoura a cota de horas",
       condicao: "usa mais horas do que o plano oferece, em ciclos seguidos",
       oferta: "upgrade de plano",
-      estado: horasConfiavel ? "ligado" : "aguardando",
+      familia: "EXCEDENTE",
+      estado: horasConfiavel ? "ligado" : "ressalva",
       nota: horasConfiavel
-        ? "ativo — roda sobre a base elegível inteira, sem corte"
-        : "aguardando a carga de reservas e contratos terminar",
+        ? "rodando sobre a base elegível inteira, sem corte · não está no documento do Diego: é pedido do responsável, e foi marcado como o mais importante"
+        : "aguardando o selo de completude de contratos e reservas",
     },
     {
-      n: 4,
+      n: "4",
       nome: "Avulso com uso alto",
-      condicao: "só compra hora avulsa, mas passou de 5h no mês",
+      condicao: "nenhum contrato com cota, mas passou de 5h no mês",
       oferta: "pacote de horas",
-      estado: reservasOk ? "pronto" : "aguardando",
-      nota: "o dado necessário está carregado · a economia vs. avulso exige uma tabela de preços que é cadastro manual — dá para disparar sem ela, só sem o número da economia",
+      familia: "USO_SEM_COTA",
+      estado: "viavel",
+      nota: "função pura escrita e testada · a economia vs. avulso NÃO sai: o próprio documento (§3.1) registra que a API não expõe preço por hora por produto. A task sai com a lacuna declarada, nunca com número estimado",
     },
     {
-      n: 5,
+      n: "10",
+      nome: "Litoral reserva sala",
+      condicao: "plano de Endereço Fiscal sem horas inclusas + fez reserva",
+      oferta: "Pacote de Horas ou upgrade para Batial (2h/mês)",
+      familia: "EVENTO_EM_SEGMENTO",
+      estado: "viavel",
+      nota: "função pura escrita e testada · o tier vem da cota do plano, não do nome — Litoral sem cota, Batial 2h, Abissal 8h, medido na Fase 0",
+    },
+    {
+      n: "1",
+      nome: "Fiscal completa 11 meses",
+      condicao: "contrato de Endereço Fiscal chega a 11 meses de startDate",
+      oferta: "plano Bianual",
+      familia: "MARCO_CONTRATO",
+      estado: "ressalva",
+      nota: "âncora decidida em 2026-08-27: startDate · ⚠ restam duas ressalvas do catálogo: só existem 2 produtos Bianual, ambos SEATECH — pode não haver oferta para o tier do cliente; e a API não encadeia contratos, então quem renovou conta do atual",
+    },
+    {
+      n: "3",
+      nome: "Padrão de compra irregular",
+      condicao: "queda em meses consecutivos",
+      oferta: "novo pacote",
+      familia: "TENDENCIA",
+      estado: "ressalva",
+      nota: 'definido em 2026-08-27: "mês a mês" · implementado com 2 quedas seguidas, que é o exemplo do documento (20h, 10h, nada) · ⚠ falta confirmar se "comprou 20h" é COMPRA ou CONSUMO — vêm de endpoints diferentes',
+    },
+    {
+      n: "5",
       nome: "Primeira reserva de sala",
       condicao: "primeira reserva do cliente, na data",
       oferta: "Endereço Fiscal + SeaBox",
-      estado: reservasOk ? "pronto" : "aguardando",
-      nota: "desbloqueado pela carga completa de reservas — antes, sem o histórico inteiro, todo cliente antigo parecia estreante",
+      familia: "PRIMEIRO_EVENTO",
+      estado: reservasOk ? "viavel" : "ressalva",
+      nota: reservasOk
+        ? "destravada pela carga completa de reservas (37/37) · a data de corte é parâmetro obrigatório: sem ela, todo cliente antigo parece estreante e saem milhares de tasks de uma vez"
+        : "sem o histórico completo de reservas, todo cliente antigo parece estreante",
     },
     {
-      n: 6,
+      n: "6",
       nome: "Privativa completa 1 mês",
       condicao: "1 mês do início do contrato de sala privativa",
       oferta: "Registro de Marca",
-      estado: contratosOk ? "pronto" : "aguardando",
-      nota: "marco de data puro sobre contrato — `contratoDesde` já está consolidado no perfil",
+      familia: "MARCO_CONTRATO",
+      estado: "ressalva",
+      nota: '⚠ falta decidir como identificar "sala privativa": a categoria "Salas Privativas - Seaway Center" inclui "Estação 01 - Coworking L21" — a estação de coworking conta?',
     },
     {
-      n: 7,
+      n: "7",
       nome: "Privativa completa 2 meses",
       condicao: "2 meses do início do contrato",
       oferta: "SeaBox como benefício",
-      estado: contratosOk ? "pronto" : "aguardando",
-      nota: "dispara, mas SEM supressão: se o SeaBox é cortesia e não vira venda, o sistema não sabe que o cliente já recebeu e vai reofertar",
+      familia: "MARCO_CONTRATO",
+      estado: "ressalva",
+      nota: "mesma dúvida de identificação da regra 6 · ⚠ e o SeaBox é cortesia: se não vira venda no Conexa, o sistema nunca saberá que o cliente já recebeu e vai reofertar",
     },
     {
-      n: 10,
-      nome: "Litoral reserva sala",
-      condicao: "plano de Endereço Fiscal SEM horas inclusas + fez reserva",
-      oferta: "Pacote de Horas ou upgrade para Batial (2h/mês)",
-      estado: reservasOk && contratosOk ? "pronto" : "aguardando",
-      nota: "o tier vem da cota do plano, não do nome do produto — Batial 2h confirmado na API",
-    },
-    {
-      n: 1,
-      nome: "Fiscal completa 11 meses",
-      condicao: "contrato de Endereço Fiscal chega a 11 meses",
-      oferta: "plano Bianual",
-      estado: "definicao",
-      nota: "o relógio começa em `startDate` ou `fidelityDate`? A diferença muda quem entra na fila",
-    },
-    {
-      n: 3,
-      nome: "Padrão de compra irregular",
-      condicao: "compra caindo mês a mês",
-      oferta: "novo pacote",
-      estado: "definicao",
-      nota: '"irregular" não tem definição numérica — quantos meses seguidos, e qual queda conta?',
-    },
-    {
-      n: 8,
-      nome: "Privativa até 6 meses",
-      condicao: "até o 6º mês do contrato",
+      n: "8",
+      nome: "Privativa completa 6 meses",
+      condicao: "aniversário de 6 meses do contrato",
       oferta: "Panteão",
-      estado: "definicao",
-      nota: 'produto existe (3380/3381) · "até o 6º mês" é aniversário ou janela aberta?',
+      familia: "MARCO_CONTRATO",
+      estado: "ressalva",
+      nota: "decidido em 2026-08-27: ANIVERSÁRIO, não janela aberta — a diferença é entre uma oferta e cento e oitenta · produto confirmado na Fase 0 (3380/3381) · mesma dúvida de identificação da regra 6",
     },
     {
-      n: 2,
+      n: "2",
       nome: "Pacote de horas acabando",
       condicao: "saldo do pacote abaixo do limiar",
       oferta: "novo pacote",
-      estado: "validacao",
-      nota: "o saldo é derivado, não lido da API — precisa bater contra a tela do Conexa antes de virar oferta. Ver Confiança",
+      familia: "SALDO_COTA",
+      estado: "definicao",
+      nota: "o saldo é DERIVADO, não lido: o documento (§3.1) registra que a API não expõe saldo de pacote. Precisa bater contra a tela do Conexa antes de virar oferta — ~20 linhas na tela Confiança",
     },
     {
-      n: 9,
+      n: "9",
       nome: "Pacote abaixo de 5h",
       condicao: "saldo do pacote menor que 5h",
       oferta: "novo pacote",
-      estado: "validacao",
-      nota: "mesma dependência do gatilho 2 — é o mesmo cálculo com outro limiar",
+      familia: "SALDO_COTA",
+      estado: "definicao",
+      nota: "mesma mecânica da regra 2, outro limiar — as duas passam ou reprovam juntas na conferência",
+    },
+    {
+      n: "métrica",
+      nome: "Queda de receita",
+      condicao: "receita cai X% de um mês fechado para o outro",
+      oferta: "olhar o cliente antes que ele saia",
+      familia: "TENDENCIA",
+      estado: "ressalva",
+      nota: "é a métrica de alerta do documento (§1), já visível na Carteira · função pura escrita e testada · ⚠ falta o cliente definir o X — hoje a tela usa 30% como exemplo, não como decisão",
     },
   ];
 }
 
 /**
- * ⚠ Cada estado tem ÍCONE, RÓTULO e cor — nesta ordem de importância. A cor
- * sozinha não pode carregar "este gatilho está desligado": é exatamente a
- * informação que, perdida, faz alguém achar que o motor está rodando.
+ * ⚠ Cada estado tem ÍCONE, RÓTULO e cor. A cor sozinha não pode carregar "este
+ * gatilho está desligado": é exatamente a informação que, perdida, faz alguém
+ * achar que o motor está rodando.
  */
 const ESTILO: Record<
   Estado,
@@ -142,49 +163,39 @@ const ESTILO: Record<
     classeAresta: "bg-[var(--bom)]",
     Icone: CircleCheck,
     rotulo: "ligado",
-    deQuem: "rodando",
+    deQuem: "disparando no Radar",
   },
-  aguardando: {
-    classeSelo: "selo-atencao",
-    classeAresta: "bg-[var(--atencao)]",
-    Icone: Clock,
-    rotulo: "aguardando dado",
-    deQuem: "espera a carga",
-  },
-  pronto: {
+  viavel: {
     classeSelo: "selo-info",
     classeAresta: "bg-[var(--acento)]",
-    Icone: Hammer,
-    rotulo: "pronto para implementar",
-    deQuem: "espera código",
+    Icone: CircleDashed,
+    rotulo: "viável",
+    deQuem: "dado e regra prontos",
+  },
+  ressalva: {
+    classeSelo: "selo-atencao",
+    classeAresta: "bg-[var(--atencao)]",
+    Icone: TriangleAlert,
+    rotulo: "com ressalva",
+    deQuem: "falta uma decisão",
   },
   definicao: {
-    classeSelo: "",
-    classeAresta: "bg-[var(--tinta-3)]",
-    Icone: HelpCircle,
-    rotulo: "falta definição",
-    deQuem: "espera o cliente",
-  },
-  validacao: {
     classeSelo: "selo-critico",
     classeAresta: "bg-[var(--critico)]",
     Icone: Ban,
-    rotulo: "falta validar o saldo",
-    deQuem: "espera conferência",
+    rotulo: "aguarda conferência",
+    deQuem: "falta validar o saldo",
   },
 };
 
-const ORDEM_RESUMO: Estado[] = ["ligado", "pronto", "definicao", "validacao"];
+const ORDEM_RESUMO: Estado[] = ["ligado", "viavel", "ressalva", "definicao"];
 
 export default async function Gatilhos() {
   const espelho = await estadoDoEspelho();
-  const completa = (e: string) =>
-    espelho.entidades.find((x) => x.entidade === e)?.completa ?? false;
-
-  const lista = gatilhos(espelho.horasConfiavel, completa("bookings"), completa("contracts"));
+  const reservasOk = espelho.entidades.find((e) => e.entidade === "bookings")?.completa ?? false;
+  const lista = gatilhos(espelho.horasConfiavel, reservasOk);
   const contagem = (e: Estado) => lista.filter((g) => g.estado === e).length;
   const ligados = contagem("ligado");
-  const prontos = contagem("pronto");
 
   return (
     <>
@@ -198,14 +209,13 @@ export default async function Gatilhos() {
         }
         acao={
           <span className={cn("selo", ligados > 0 ? "selo-bom" : "selo-atencao")}>
-            {ligados} de {lista.length} ativos
+            {ligados} de {lista.length} disparando
           </span>
         }
       />
 
       <div className="space-y-8">
-        {/* Placar por estado. O que interessa não é "quantos faltam", é DE QUEM
-            é a próxima ação em cada um. */}
+        {/* O placar não conta "quantos faltam" — conta DE QUEM é a próxima ação. */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {ORDEM_RESUMO.map((e) => {
             const { Icone, rotulo, classeSelo, deQuem } = ESTILO[e];
@@ -232,20 +242,20 @@ export default async function Gatilhos() {
           })}
         </div>
 
-        {prontos > 0 ? (
-          <Faixa tom="info">
-            <strong>
-              {prontos} {prontos === 1 ? "gatilho tem" : "gatilhos têm"} todo o dado necessário
-            </strong>{" "}
-            e espera apenas o motor de regras — que ainda não existe. Nenhum cria task no ClickUp:
-            a camada de disparo não foi construída. O que roda hoje aparece no Radar, para o
-            vendedor decidir o que fazer.
-          </Faixa>
-        ) : null}
+        <Faixa tom="info">
+          <strong>As regras já existem como funções puras testadas</strong> —{" "}
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
+            src/lib/regras/familias.ts
+          </code>
+          , 26 testes. O que falta para virarem oferta de verdade é a{" "}
+          <strong>camada de disparo</strong>: criar task no ClickUp para o vendedor responsável.
+          Ela não existe, e depende de o ClickUp entrar — é de lá que sai o vendedor, segundo o
+          documento (§2).
+        </Faixa>
 
         <Secao
           titulo="Os gatilhos"
-          sub="Agrupados pelo que falta. Fonte: documento de especificação do cliente, mais um derivado da conversa com o responsável."
+          sub="Fonte: documento do Diego, mais um pedido do responsável. Estados conforme a análise de viabilidade do repositório."
         >
           <div className="space-y-2">
             {lista.map((g) => {
@@ -255,7 +265,6 @@ export default async function Gatilhos() {
                   key={g.nome}
                   className="cartao cartao-alvo relative overflow-hidden px-4 py-3.5 pl-5"
                 >
-                  {/* Aresta de estado: legível de relance na lista inteira. */}
                   <span
                     aria-hidden
                     className={cn("absolute inset-y-0 left-0 w-[3px]", e.classeAresta)}
@@ -264,8 +273,9 @@ export default async function Gatilhos() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <span className="text-[14.5px] font-semibold">{g.nome}</span>
                     <span className="selo">
-                      {g.n ? `regra ${g.n}` : "pedido do responsável"}
+                      {g.n === "extra" || g.n === "métrica" ? g.n : `regra ${g.n}`}
                     </span>
+                    <span className="selo font-mono text-[11px]">{g.familia}</span>
                     <span className={cn("selo ml-auto", e.classeSelo)}>
                       <e.Icone size={11.5} aria-hidden />
                       {e.rotulo}
@@ -291,13 +301,10 @@ export default async function Gatilhos() {
         </Secao>
 
         <Nota>
-          As três perguntas em <strong>falta definição</strong> estão em
-          <code className="mx-1 rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">
-            docs/context/perguntas-abertas.md
-          </code>
-          e precisam de resposta do cliente — não há como decidi-las pelo dado. As duas em{" "}
-          <strong>falta validar</strong> dependem de alguém conferir ~20 linhas na tela Confiança
-          contra o Conexa.
+          As 12 linhas colapsam em <strong>6 famílias</strong> de código, não 12 arquivos — manter
+          uma por regra seria ter doze lugares para corrigir o mesmo bug de aritmética de datas.
+          Três definições que travavam as regras 1, 3 e 8 foram respondidas pelo dono em
+          <strong> 2026-08-27</strong> e já estão implementadas.
         </Nota>
       </div>
     </>
