@@ -82,10 +82,10 @@ model LoginEvent {
 // ===========================================================================
 
 model Company {
-  conexaId  Int      @id
-  name      String?
-  raw       Json
-  syncedAt  DateTime @default(now())
+  conexaId Int      @id
+  name     String?
+  raw      Json
+  syncedAt DateTime @default(now())
 
   @@map("dim_companies")
 }
@@ -100,11 +100,11 @@ model ServiceCategory {
 }
 
 model Plan {
-  conexaId                Int      @id
+  conexaId                Int     @id
   companyConexaId         Int?
   name                    String?
   serviceCategoryConexaId Int?
-  isActive                Boolean  @default(true)
+  isActive                Boolean @default(true)
 
   /// Horas mensais INCLUSAS no plano, como o Conexa declara em `hourQuotas`.
   ///
@@ -115,9 +115,9 @@ model Plan {
   ///
   /// `null` significa **plano sem horas inclusas** (é o caso do Litoral), e é
   /// diferente de zero. Ver docs/context/fase-0-conclusoes.md.
-  horasInclusasMes        Decimal? @db.Decimal(10, 2)
+  horasInclusasMes Decimal? @db.Decimal(10, 2)
   /// Cru das cotas, para auditoria e para a Fase 3 (ciclo, grupo, sala).
-  hourQuotasRaw           Json?
+  hourQuotasRaw    Json?
 
   raw      Json
   syncedAt DateTime @default(now())
@@ -143,21 +143,21 @@ model Product {
 }
 
 model Customer {
-  conexaId        Int      @id
-  companyConexaId Int?
-  name            String?
-  tradeName       String?
-  document        String? // CPF/CNPJ
-  isJuridicalPerson Boolean @default(false)
+  conexaId          Int       @id
+  companyConexaId   Int?
+  name              String?
+  tradeName         String?
+  document          String? // CPF/CNPJ
+  isJuridicalPerson Boolean   @default(false)
   /// Gate de elegibilidade (ADR-0010): cliente inativo ou bloqueado nunca recebe
   /// oferta. São colunas, e não leitura do `raw`, para poderem ir no WHERE.
-  isActive        Boolean  @default(true)
-  isBlocked       Boolean  @default(false)
-  city            String?
-  state           String?
-  createdAtConexa DateTime?
-  raw             Json
-  syncedAt        DateTime @default(now())
+  isActive          Boolean   @default(true)
+  isBlocked         Boolean   @default(false)
+  city              String?
+  state             String?
+  createdAtConexa   DateTime?
+  raw               Json
+  syncedAt          DateTime  @default(now())
 
   // Só as tabelas DERIVADAS têm relação: elas são nossas, nascem depois dos
   // clientes e o cascade delete é desejável. As de espelho, não — ver Contract.
@@ -205,7 +205,7 @@ model Contract {
   /// Cota de horas do CONTRATO (sobrepõe a do plano quando existe).
   /// Fase 0: 100% das cotas reais são por grupo (id 2, único). Guardado cru
   /// porque o ciclo e o carry-over ainda são incógnitas — Fase 3.
-  hourPlanQuotaRaw   Json?
+  hourPlanQuotaRaw Json?
 
   createdAtConexa DateTime?
   updatedAtConexa DateTime?
@@ -221,28 +221,28 @@ model Contract {
 }
 
 model Sale {
-  conexaId         Int       @id
+  conexaId         Int      @id
   customerConexaId Int?
   productConexaId  Int?
   contractConexaId Int?
   recurringSaleId  Int?
   sellerId         Int?
-  amount           Decimal   @db.Decimal(14, 2)
-  originalAmount   Decimal?  @db.Decimal(14, 2)
-  discountValue    Decimal?  @db.Decimal(14, 2)
+  amount           Decimal  @db.Decimal(14, 2)
+  originalAmount   Decimal? @db.Decimal(14, 2)
+  discountValue    Decimal? @db.Decimal(14, 2)
 
   /// Quantidade vendida. Numa venda gerada por reserva de sala, é a DURAÇÃO EM
   /// HORAS — confirmado na Fase 0 (20/20 pares reserva×venda concordam).
   /// ⚠ A coleção Postman tipa o campo como `integer` e como "quantidade de
   /// itens"; a documentação está errada e o dado real carrega fracionário.
-  quantity         Decimal?  @db.Decimal(14, 4)
+  quantity Decimal? @db.Decimal(14, 4)
 
-  status           String?
-  referenceDate    DateTime?
-  createdAtConexa  DateTime?
-  updatedAtConexa  DateTime?
-  raw              Json
-  syncedAt         DateTime  @default(now())
+  status          String?
+  referenceDate   DateTime?
+  createdAtConexa DateTime?
+  updatedAtConexa DateTime?
+  raw             Json
+  syncedAt        DateTime  @default(now())
 
   @@index([customerConexaId])
   @@index([productConexaId])
@@ -261,7 +261,7 @@ model Sale {
 ///  - cancelada e `negotiated` saem dos totais — a segunda porque o Conexa cria
 ///    uma cobrança NOVA na renegociação, e somar as duas é dupla contagem.
 model Charge {
-  conexaId         Int       @id
+  conexaId         Int     @id
   companyConexaId  Int?
   customerConexaId Int?
   status           String? // unpaid | paid | cancelled | negotiated | ...
@@ -306,17 +306,17 @@ model Charge {
 /// quais salas compõem o grupo da cota — a pergunta "esta reserva consome a
 /// cota?" já vem respondida no dado. Ver ADR-0005 e fase-0-conclusoes.md.
 model RoomBooking {
-  conexaId         Int       @id
+  conexaId         Int     @id
   customerConexaId Int?
   personConexaId   Int?
   saleConexaId     Int?
   placeConexaId    Int?
   placeName        String?
 
-  status           String? // deductedFromQuota | billed | notBilled | ...
-  isActive         Boolean   @default(true)
-  isBilled         Boolean   @default(false)
-  completed        Boolean   @default(false)
+  status             String? // deductedFromQuota | billed | notBilled | ...
+  isActive           Boolean @default(true)
+  isBilled           Boolean @default(false)
+  completed          Boolean @default(false)
   cancellationReason String?
   recurringBookingId Int?
 
@@ -359,18 +359,18 @@ enum Procedencia {
 /// Materializada (e não calculada a cada request) porque a tela de um cliente
 /// precisa de 12 meses e a lista precisa do ano inteiro de ~5.500 clientes.
 model CustomerMonthlyRevenue {
-  id               String   @id @default(cuid())
+  id               String      @id @default(cuid())
   customerConexaId Int
-  customer         Customer @relation(fields: [customerConexaId], references: [conexaId], onDelete: Cascade)
+  customer         Customer    @relation(fields: [customerConexaId], references: [conexaId], onDelete: Cascade)
   /// 'yyyy-MM'
   mesKey           String
-  receita          Decimal  @db.Decimal(14, 2)
-  cobrancas        Int      @default(0)
+  receita          Decimal     @db.Decimal(14, 2)
+  cobrancas        Int         @default(0)
   /// Variação percentual contra o mês anterior. **NULL quando o anterior é
   /// zero** — sem base não existe "queda de X%". Critério de aceite da Fase 1.
-  variacaoPct      Decimal? @db.Decimal(10, 4)
+  variacaoPct      Decimal?    @db.Decimal(10, 4)
   procedencia      Procedencia @default(DERIVADO)
-  calculadoEm      DateTime @default(now())
+  calculadoEm      DateTime    @default(now())
 
   @@unique([customerConexaId, mesKey])
   @@index([mesKey])
@@ -382,20 +382,20 @@ model CustomerProfile {
   customerConexaId Int      @id
   customer         Customer @relation(fields: [customerConexaId], references: [conexaId], onDelete: Cascade)
 
-  receitaAnoCorrente Decimal @db.Decimal(14, 2) @default(0)
-  receita12Meses     Decimal @db.Decimal(14, 2) @default(0)
+  receitaAnoCorrente  Decimal   @default(0) @db.Decimal(14, 2)
+  receita12Meses      Decimal   @default(0) @db.Decimal(14, 2)
   /// Mês fechado mais recente com receita, e o valor.
   ultimoMesComReceita String?
   /// Segmentos do cliente, derivados de contrato → plano → categoria de serviço.
   /// Nunca por substring do nome do produto.
-  segmentos          String[]
+  segmentos           String[]
   /// Horas mensais inclusas somadas dos contratos ativos. `null` = sem cota
   /// (é o caso do Endereço Fiscal Litoral), que NÃO é o mesmo que zero.
-  horasInclusasMes   Decimal? @db.Decimal(10, 2)
-  temContratoAtivo   Boolean  @default(false)
-  contratosAtivos    Int      @default(0)
+  horasInclusasMes    Decimal?  @db.Decimal(10, 2)
+  temContratoAtivo    Boolean   @default(false)
+  contratosAtivos     Int       @default(0)
   /// Início do contrato ativo mais antigo — âncora dos marcos (regras 1, 6, 7, 8).
-  contratoDesde      DateTime? @db.Date
+  contratoDesde       DateTime? @db.Date
 
   procedencia Procedencia @default(DERIVADO)
   calculadoEm DateTime    @default(now())
@@ -452,17 +452,17 @@ model SyncRun {
 /// Completude passa a ser "todas as janelas do período estão CONCLUIDA", que é
 /// verificável, em vez de "o cursor chegou ao fim", que não é.
 model SyncWindow {
-  entidade  String
+  entidade     String
   /// 'yyyy-MM'
-  janela    String
-  status    JanelaStatus @default(PENDENTE)
+  janela       String
+  status       JanelaStatus @default(PENDENTE)
   /// Offset já consumido DENTRO da janela — permite retomar no meio dela.
-  offset    Int          @default(0)
-  registros Int          @default(0)
-  erro      String?
-  iniciadaEm DateTime?
-  concluidaEm DateTime?
-  atualizadaEm DateTime @updatedAt
+  offset       Int          @default(0)
+  registros    Int          @default(0)
+  erro         String?
+  iniciadaEm   DateTime?
+  concluidaEm  DateTime?
+  atualizadaEm DateTime     @updatedAt
 
   @@id([entidade, janela])
   @@index([entidade, status])
@@ -488,4 +488,44 @@ model SyncState {
   detail    Json?
 
   @@map("sync_state")
+}
+
+/// Registro de uma CONFERÊNCIA do espelho contra o Conexa.
+///
+/// ⚠ O resultado não era guardado em lugar nenhum: `acaoReconciliar` devolvia
+/// direto para a tela e sumia no primeiro F5. Uma conferência que custa minutos
+/// e dezenas de requisições da API precisa deixar rastro — senão ninguém sabe
+/// se a última foi ontem ou nunca, e a tela não consegue dizer "jul/2026 bateu
+/// em 27/08".
+///
+/// É o mesmo princípio do §5.4 do documento do Diego, que manda guardar
+/// histórico dos disparos para não repetir oferta. Aqui vale para a auditoria:
+/// afirmação sobre correção sem data é afirmação sem valor.
+model Reconciliacao {
+  id           String   @id @default(cuid())
+  /// 'yyyy-MM' do mês conferido.
+  mesKey       String
+  /// Sempre "vencimento" hoje — a API não filtra por emissão. Fica explícito
+  /// no dado para o dia em que houver outra janela.
+  janela       String   @default("vencimento")
+  executadaEm  DateTime @default(now())
+  /// Quem mandou conferir. Sem relação: o registro sobrevive ao usuário.
+  executadaPor String?
+
+  /// BATE | DIVERGE | NADA_A_CONFERIR
+  veredicto      String
+  localTotal     Decimal @db.Decimal(14, 2)
+  localContagem  Int
+  remotoTotal    Decimal @db.Decimal(14, 2)
+  remotoContagem Int
+  diferenca      Decimal @db.Decimal(14, 2)
+  /// Quantas divergências no total — pode ser maior que a lista guardada.
+  divergencias   Int     @default(0)
+  /// As primeiras 50, como vieram. Json para não modelar quatro motivos.
+  detalhe        Json?
+  requisicoes    Int     @default(0)
+  observacao     String?
+
+  @@index([mesKey, executadaEm])
+  @@map("reconciliacoes")
 }

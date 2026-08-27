@@ -4,6 +4,7 @@ import { CircleCheck, CircleAlert, TriangleAlert, Loader, type LucideIcon } from
 import { acaoReconciliar } from "@/lib/operacao/actions";
 import type { ResultadoReconciliacao } from "@/lib/intel/reconciliar";
 import { rotuloMes } from "@/lib/dates";
+import { formatBRL } from "@/lib/money";
 import { cn } from "@/lib/ui";
 
 /**
@@ -83,11 +84,16 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
             ) : null}
 
             <dl className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
-              <Par t="Local" v={`R$ ${r.localTotal}`} sub={`${r.localContagem} cobranças`} />
-              <Par t="Conexa" v={`R$ ${r.remotoTotal}`} sub={`${r.remotoContagem} cobranças`} />
+              {/* ⚠ formatBRL, não interpolação crua. O resultado real saía
+                   "R$ 428216.87" — ponto decimal e sem separador de milhar —
+                   enquanto o resto do sistema inteiro mostra R$ 428.216,87.
+                   Número de dinheiro com duas grafias na mesma tela faz o
+                   leitor duvidar de qual está certo. */}
+              <Par t="Local" v={formatBRL(r.localTotal)} sub={`${r.localContagem} cobranças`} />
+              <Par t="Conexa" v={formatBRL(r.remotoTotal)} sub={`${r.remotoContagem} cobranças`} />
               <Par
                 t="Diferença"
-                v={`R$ ${r.diferenca}`}
+                v={formatBRL(r.diferenca)}
                 destaque={r.veredicto === "DIVERGE" ? "critico" : undefined}
               />
             </dl>
@@ -103,8 +109,8 @@ export function PainelReconciliacao({ meses }: { meses: string[] }) {
                       cobrança{" "}
                       <strong className="num font-semibold text-[var(--tinta)]">{d.chargeId}</strong>{" "}
                       — {d.motivo}
-                      {d.local ? ` · local R$ ${d.local}` : ""}
-                      {d.remoto ? ` · Conexa R$ ${d.remoto}` : ""}
+                      {d.local ? ` · local ${formatBRL(d.local)}` : ""}
+                      {d.remoto ? ` · Conexa ${formatBRL(d.remoto)}` : ""}
                     </li>
                   ))}
                 </ul>

@@ -2,6 +2,7 @@ import { ultimosMesesFechados } from "@/lib/dates";
 import { usuarioAtual } from "@/lib/auth/session";
 import { PainelReconciliacao } from "./painel-reconciliacao";
 import { Faixa, Nota } from "@/components/Cartao";
+import { HistoricoReconciliacao } from "./historico-reconciliacao";
 
 export async function SecaoReconciliacao() {
   const usuario = await usuarioAtual();
@@ -51,6 +52,8 @@ export async function SecaoReconciliacao() {
       ) : (
         <Nota>Reconciliação é restrita a administradores.</Nota>
       )}
+
+      <HistoricoReconciliacao />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { usuarioAtual } from "@/lib/auth/session";
+import { prisma } from "@/lib/db";
 import { syncDimensoes } from "@/lib/conexa/sync";
 import { cargaHistorica, sincronizarIncremental } from "@/lib/conexa/sync-janelas";
 import type { Entidade } from "@/lib/conexa/janelas";
@@ -50,6 +51,38 @@ export async function acaoConsolidar() {
 }
 
 export async function acaoReconciliar(mesKey: string): Promise<ResultadoReconciliacao> {
-  await exigirAdmin();
-  return reconciliarMes(mesKey);
+  const u = await exigirAdmin();
+  const r = await reconciliarMes(mesKey);
+
+  // ⚠ Grava ANTES de devolver. O resultado vivia só no estado da tela e sumia
+  // no primeiro F5 — uma conferência que custa minutos e dezenas de requisições
+  // não deixava rastro nenhum. Sem registro, ninguém sabe se a última foi ontem
+  // ou nunca, e afirmação sobre correção sem data não vale nada.
+  //
+  // Falha de gravação NÃO derruba a conferência: o número na tela é o produto,
+  // o histórico é o bônus.
+  try {
+    await prisma.reconciliacao.create({
+      data: {
+        mesKey: r.mesKey,
+        janela: r.janela,
+        executadaPor: u.email,
+        veredicto: r.veredicto,
+        localTotal: r.localTotal,
+        localContagem: r.localContagem,
+        remotoTotal: r.remotoTotal,
+        remotoContagem: r.remotoContagem,
+        diferenca: r.diferenca,
+        divergencias: r.divergencias.length,
+        detalhe: r.divergencias.length ? (r.divergencias as never) : undefined,
+        requisicoes: r.requisicoes,
+        observacao: r.observacao ?? null,
+      },
+    });
+    revalidatePath("/confianca");
+  } catch (err) {
+    console.error("[reconciliar] falhou ao gravar o histórico:", err);
+  }
+
+  return r;
 }
