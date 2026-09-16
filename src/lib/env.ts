@@ -48,6 +48,31 @@ const envSchema = z.object({
   CRON_SECRET: z.string().default(""),
 
   // -------------------------------------------------------------------------
+  // MCP — acesso programático ao painel
+  // -------------------------------------------------------------------------
+  /**
+   * Token do servidor MCP (`/api/mcp`), no header `Authorization: Bearer ...`.
+   *
+   * ⚠ **Vazio = rota FECHADA (503)**, e não aberta. É a mesma escolha de
+   * `CRON_SECRET`: um deploy que esqueceu a variável não pode virar um endpoint
+   * público com escrita no banco e consumo do rate limit do Conexa. Errar para
+   * o lado de "não funciona" é recuperável; errar para o lado de "funciona para
+   * qualquer um" não é.
+   *
+   * Gere com: openssl rand -base64 48
+   */
+  MCP_TOKEN: z.string().default(""),
+  /**
+   * Trava o MCP em leitura. `on` recusa toda ferramenta que escreve, inclusive
+   * as de configuração e as de carga.
+   *
+   * Existe para quando o token for entregue a alguém de fora do time, ou para
+   * apontar um cliente de IA à produção sem risco de alteração. O padrão é
+   * `off` porque o pedido é justamente poder editar pelo MCP.
+   */
+  MCP_SOMENTE_LEITURA: z.enum(["on", "off"]).default("off"),
+
+  // -------------------------------------------------------------------------
   // Agendadores — três chaves independentes (ADR-0003)
   // -------------------------------------------------------------------------
   /** Leitura do Conexa (espelho local). */

@@ -18,7 +18,9 @@ o vendedor responsável.
    pelo time comercial); família de regra é *código puro*, testado e backtestável. As 10 regras
    do documento de especificação colapsam em **6 famílias**.
 4. **Camada de disparo isolada e desligada por padrão** — cria task no ClickUp, com idempotência
-   garantida por constraint de banco.
+   garantida por constraint de banco. *(ainda não implementada)*
+5. **Servidor MCP embutido** (`/api/mcp`) — consulta, operação e edição da plataforma a partir de
+   um cliente de IA, com token próprio e rastro de auditoria. Ver [mcp.md](docs/context/mcp.md).
 
 ## O que ele NÃO é
 
@@ -50,6 +52,7 @@ com o código**:
 | [roadmap.md](docs/context/roadmap.md) | Fases, entregáveis e critérios de aceite |
 | [riscos.md](docs/context/riscos.md) | Riscos e o que os mitiga |
 | [perguntas-abertas.md](docs/context/perguntas-abertas.md) | O que precisa ser respondido, por quem e o que bloqueia |
+| [mcp.md](docs/context/mcp.md) | O servidor MCP: endereço, ferramentas, decisões — e por que o MCP do Conexa não substitui o espelho |
 | [progress.md](docs/context/progress.md) | Log cronológico — atualizar a cada commit |
 
 ## Desenvolvimento local
@@ -135,17 +138,38 @@ ninguém clicar em nada.
 
 **Funciona hoje:** espelho do Conexa por janela mensal (clientes, contratos, planos, produtos,
 categorias, vendas, cobranças, reservas) · receita por cliente e por mês com variação · consumo de
-horas por ciclo com o sinal de **excedente recorrente** · reconciliação · as telas
-**Radar · Carteira · Gatilhos · Confiança · Motor**.
+horas por ciclo com o sinal de **excedente recorrente** · reconciliação com histórico · registro
+manual de contato · **motor de regras** avaliando os 12 gatilhos em lote sobre a base inteira ·
+**configuração editável pela tela** (limiares, liga-desliga, gatilho novo, classificação de
+categoria, cadastro de agentes) · **servidor MCP** · as telas
+**Radar · Carteira · Gatilhos · Agentes · Confiança · Motor**.
 
-**Ainda NÃO existe:** motor das 10 regras (`src/lib/regras/`), camada de disparo
-(`src/lib/disparo/`) e cadastro de vendedor. Nenhuma task é criada no ClickUp.
+**Ainda NÃO existe:** camada de disparo (`src/lib/disparo/`). Nenhuma task é criada no ClickUp, e
+essa ausência é estrutural — não é um toggle desligado.
 
-🔴 **Bloqueio atual:** o vendedor responsável **não é resolvível pela API** — ver
-[perguntas-abertas.md](docs/context/perguntas-abertas.md). Sem ele, um sinal não tem dono.
+🔴 **Bloqueios que dependem de terceiro, não de código.** Três liberações de token no Conexa:
+
+| Endpoint | O que destrava |
+|---|---|
+| `/packages` | saldo do pacote de horas — as **regras 2 e 9** e o filtro "horas disponíveis" da Carteira |
+| `/sellers` | vendedor responsável (e, mesmo liberado, o `sellerId` do contrato é o vendedor **da época**) |
+| salas e espaços em `/products` | as vendas órfãs de produto, que fazem regras por `productId` falharem em silêncio |
 
 Ponto de retomada detalhado: [progress.md](docs/context/progress.md) e
 [roadmap.md](docs/context/roadmap.md).
+
+## MCP
+
+O painel expõe um servidor MCP em `/api/mcp` — 31 ferramentas, 18 de leitura e 13 de escrita.
+
+```bash
+claude mcp add --transport http seahub-comercial   https://SEU-DOMINIO/api/mcp   --header "Authorization: Bearer $MCP_TOKEN"
+```
+
+Sem `MCP_TOKEN` a rota responde **503**, não 200 — nasce fechada. `MCP_SOMENTE_LEITURA=on`
+trava tudo em leitura. Toda escrita grava quem mudou o quê, com `origem: "MCP"`.
+
+Detalhes, decisões e a diferença para o **MCP do Conexa**: [mcp.md](docs/context/mcp.md).
 
 ## Regra permanente
 

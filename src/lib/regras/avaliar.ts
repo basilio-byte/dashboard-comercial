@@ -1,12 +1,9 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { keyToUtcDate, todayKey, currentMonthKey, ultimosMesesFechados } from "@/lib/dates";
-import { money } from "@/lib/money";
-import { horasDoCliente } from "@/lib/intel/horas";
+import { money, type Money } from "@/lib/money";
+import { horasDoCliente, type HorasDoCliente } from "@/lib/intel/horas";
 import {
-  ehSegmentoFiscal,
-  ehSegmentoPrivativa,
-  ehSegmentoSeaBox,
   litoralReservouSala,
   marcoAtingido,
   posseDoProduto,
@@ -15,6 +12,9 @@ import {
   quedaPercentual,
   usoAvulsoAlto,
 } from "./familias";
+import { carregarGatilhos, type GatilhoResolvido } from "./config";
+import { lerParams } from "./catalogo";
+import { carregarSegmentos, type MapaDeSegmentos } from "./segmentos";
 
 /**
  * SINAIS AUTOMÁTICOS DE UM CLIENTE — a aba que o documento do Diego pede.
@@ -31,12 +31,20 @@ import {
  *
  * ⚠ **Isto NÃO dispara nada.** É a camada de avaliação, e a de disparo não
  * existe. Ver a tela por cliente — é lá que o vendedor lê e decide.
+ *
+ * ⚠ **Desde 2026-09-16 a lista de regras é DADO, não código.** A função varre
+ * `carregarGatilhos()` e despacha por família, em vez de percorrer arrays
+ * escritos aqui dentro. É o que faz o "campo editável para criar gatilhos" do
+ * Diego existir: um gatilho novo aparece nesta tela sem tocar neste arquivo.
+ *
+ * O que continua sendo código é a FAMÍLIA — a pergunta que a regra faz. Ver
+ * `catalogo.ts` para o porquê dessa fronteira.
  */
 
 export type EstadoSinal = "ATIVO" | "NAO_APLICAVEL" | "DADO_INDISPONIVEL" | "AMBIGUO";
 
 export interface Sinal {
-  /** "1".."10", "extra" (pedido do responsável) ou "métrica" (§1 do documento). */
+  /** "1".."10", "extra", "métrica" ou o código de um gatilho criado na tela. */
   regra: string;
   nome: string;
   familia: string;
@@ -46,40 +54,64 @@ export interface Sinal {
   motivo: string;
   /** O número concreto que sustenta o sinal, quando ele existe. */
   evidencia?: string;
-}
-
-/**
- * ⚠ PARÂMETROS, com valores de partida — não decisões.
- *
- * O documento fala em "cair X%", e o X é do cliente. Todos estes deveriam
- * morar numa tela de Configurações; até lá vivem aqui, num lugar só, com o
- * status declarado na própria tela.
- */
-export const PARAMS = {
-  /** O job roda uma vez por dia; sem folga, um marco perdido some para sempre. */
-  toleranciaMarcoDias: 3,
-  /** Regra 4: ">5h no mês" é do documento. */
-  limiarHorasAvulso: 5,
-  /** Regra 3: o exemplo do documento (20h, 10h, nada) são 2 quedas seguidas. */
-  quedasSeguidas: 2,
-  /** Métrica §1: o X do "cair X%". ⚠ Ainda não definido pelo cliente. */
-  limiarQuedaPct: 30,
   /**
-   * Regra 5: estreia anterior a esta data não conta.
+   * O gatilho está DESLIGADO na configuração.
    *
-   * ⚠ Sem corte, todo cliente antigo parece estreante e sairiam milhares de
-   * ofertas de uma vez. É o freio que o repositório marcou como obrigatório.
+   * ⚠ Não virou um quinto estado de propósito: os quatro são do documento do
+   * Diego, e inventar taxonomia paralela já deu errado uma vez neste projeto.
+   * Mas também não podia sumir da tela — "não aplicável" e "alguém desligou"
+   * parecem iguais e são opostos quando se investiga por que um cliente não
+   * apareceu na fila. Então é uma marca ao lado do estado, não outro estado.
    */
-  primeiraReservaDesde: "2026-08-01",
-} as const;
+  desligado?: boolean;
+}
 
 const h = (v: { toFixed: (n: number) => string }) => `${Number(v.toFixed(1))}h`.replace(".", ",");
 /** Decimal em pt-BR. Ponto no lugar de vírgula é a marca de número não formatado. */
 const num = (v: number) => v.toFixed(1).replace(".", ",");
 
+// ---------------------------------------------------------------------------
+// O contexto que as famílias leem
+// ---------------------------------------------------------------------------
+
+interface ContextoDoCliente {
+  hoje: Date;
+  mesAtual: string;
+  contratos: Array<{
+    conexaId: number;
+    planConexaId: number | null;
+    startDate: Date | null;
+  }>;
+  /** categoria de serviço do contrato: id e nome, para o mapa de segmentos. */
+  categoriaDo(planConexaId: number | null): { id: number | null; nome: string };
+  /**
+   * O plano do contrato NÃO tem horas inclusas.
+   *
+   * ⚠ É assim que o tier do Endereço Fiscal é identificado, e não pelo nome:
+   * Litoral não tem cota, Batial tem 2h, Abissal 8h — medido na Fase 0. `null`
+   * em `hourQuotas` é "plano sem horas inclusas", que é diferente de zero.
+   */
+  planoSemCota(planConexaId: number | null): boolean;
+  segmentos: MapaDeSegmentos;
+  horas: HorasDoCliente;
+  horasNoMes: Money;
+  reservasNoMes: number;
+  primeiraReservaEm: Date | null;
+  serie: Array<{ mesKey: string; valor: Money }>;
+  /** O cliente já tem SeaBox, e por qual via. */
+  posseSeabox: "POR_COMPRA" | "POR_CORTESIA" | "NAO_POSSUI" | "DESCONHECIDO";
+  temContratoSeaBox: boolean;
+}
+
 export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]> {
   const hoje = keyToUtcDate(todayKey());
   const mesAtual = currentMonthKey();
+
+  const [gatilhos, segmentos] = await Promise.all([carregarGatilhos(), carregarSegmentos()]);
+
+  // Os ciclos do excedente são parâmetro do gatilho "extra" — lidos antes da
+  // consulta porque `horasDoCliente` precisa deles.
+  const pExcedente = lerParams("EXCEDENTE", gatilhos.porCodigo.get("extra")?.params).params;
 
   const [contratos, horas, bookings, mensais, vendas] = await Promise.all([
     prisma.contract.findMany({
@@ -90,7 +122,10 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
       },
       orderBy: { startDate: "asc" },
     }),
-    horasDoCliente(customerConexaId),
+    horasDoCliente(customerConexaId, undefined, {
+      ciclosAnalisados: pExcedente.ciclosAnalisados,
+      ciclosComEstouro: pExcedente.ciclosComEstouro,
+    }),
     prisma.roomBooking.findMany({
       where: { customerConexaId, isActive: true, cancellationReason: null },
       select: { dataLocal: true, horas: true },
@@ -118,117 +153,45 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
   /** Categoria de serviço do contrato — a fonte legítima de segmento. */
   const categoriaDo = (planConexaId: number | null) => {
     const p = planConexaId !== null ? planoPor.get(planConexaId) : undefined;
-    return p?.serviceCategoryConexaId != null ? nomeCat.get(p.serviceCategoryConexaId) ?? "" : "";
+    const id = p?.serviceCategoryConexaId ?? null;
+    return { id, nome: id != null ? nomeCat.get(id) ?? "" : "" };
   };
 
-  const compradas = [...new Set(vendas.map((v) => v.productConexaId).filter((x): x is number => x !== null))];
-  const sinais: Sinal[] = [];
-
-  // ── extra · EXCEDENTE — o único que já dispara hoje ─────────────────────
-  sinais.push(
-    horas.semContrato
-      ? sem("extra", "Estoura a cota de horas", "EXCEDENTE", "upgrade de plano",
-          "Cliente sem contrato ativo com plano — não há cota a estourar.")
-      : horas.atribuicaoAmbigua
-        ? ambiguo("extra", "Estoura a cota de horas", "EXCEDENTE", "upgrade de plano",
-            "Mais de um contrato com cota: a reserva não diz de qual balde a hora saiu.")
-        : horas.sinal?.recorrente
-          ? ativo("extra", "Estoura a cota de horas", "EXCEDENTE", "upgrade de plano",
-              `Estourou em ${horas.sinal.ciclosComEstouro} de ${horas.sinal.ciclosConclusivos} ciclos conclusivos.`,
-              `${h(horas.sinal.horasExcedentes)} pagas por fora do plano`)
-          : sem("extra", "Estoura a cota de horas", "EXCEDENTE", "upgrade de plano",
-              horas.sinal
-                ? `Estourou em ${horas.sinal.ciclosComEstouro} de ${horas.sinal.ciclosConclusivos} ciclos — não é recorrente.`
-                : "Sem ciclos fechados suficientes para avaliar."),
-  );
-
-  // ── MARCO_CONTRATO · regras 1, 6, 7, 8 ──────────────────────────────────
-  const marcos: Array<{ regra: string; nome: string; meses: number; oferta: string; privativa: boolean }> = [
-    { regra: "1", nome: "Fiscal completa 11 meses", meses: 11, oferta: "plano Bianual", privativa: false },
-    { regra: "6", nome: "Privativa completa 1 mês", meses: 1, oferta: "Registro de Marca", privativa: true },
-    { regra: "7", nome: "Privativa completa 2 meses", meses: 2, oferta: "SeaBox como benefício", privativa: true },
-    { regra: "8", nome: "Privativa completa 6 meses", meses: 6, oferta: "Panteão", privativa: true },
-  ];
-
-  for (const m of marcos) {
-    const candidatos = contratos.filter((c) => {
-      const cat = categoriaDo(c.planConexaId);
-      return m.privativa ? ehSegmentoPrivativa(cat) : ehSegmentoFiscal(cat);
-    });
-
-    if (!candidatos.length) {
-      sinais.push(sem(m.regra, m.nome, "MARCO_CONTRATO", m.oferta,
-        `Nenhum contrato ativo de ${m.privativa ? "sala privativa" : "Endereço Fiscal"}.`));
-      continue;
-    }
-    const semData = candidatos.filter((c) => !c.startDate);
-    const atingiu = candidatos.find(
-      (c) => c.startDate && marcoAtingido({
-        inicio: c.startDate, meses: m.meses, hoje, toleranciaDias: PARAMS.toleranciaMarcoDias,
-      }),
-    );
-
-    if (atingiu) {
-      sinais.push(ativo(m.regra, m.nome, "MARCO_CONTRATO", m.oferta,
-        `Contrato #${atingiu.conexaId} completou ${m.meses} ${m.meses === 1 ? "mês" : "meses"} (âncora startDate).`,
-        `desde ${fmtDia(atingiu.startDate!)}`));
-    } else if (semData.length === candidatos.length) {
-      sinais.push(indisponivel(m.regra, m.nome, "MARCO_CONTRATO", m.oferta,
-        "Contrato sem `startDate` — não há de onde contar o marco."));
-    } else {
-      sinais.push(sem(m.regra, m.nome, "MARCO_CONTRATO", m.oferta,
-        `Nenhum contrato no marco de ${m.meses} ${m.meses === 1 ? "mês" : "meses"} hoje.`));
-    }
-  }
-
-  // ── USO_SEM_COTA · regra 4 ──────────────────────────────────────────────
   const horasNoMes = bookings
     .filter((b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual)
     .reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
-  const temCota = horas.contratos.some((c) => c.concedido !== null);
+  const reservasNoMes = bookings.filter(
+    (b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual,
+  ).length;
+  const primeiraReservaEm = bookings.find((b) => b.dataLocal)?.dataLocal ?? null;
 
-  sinais.push(
-    usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes, limiarHoras: PARAMS.limiarHorasAvulso })
-      ? ativo("4", "Avulso com uso alto", "USO_SEM_COTA", "pacote de horas",
-          `Sem contrato com cota e ${h(horasNoMes)} usadas em ${mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
-          `${h(horasNoMes)} no mês`)
-      : sem("4", "Avulso com uso alto", "USO_SEM_COTA", "pacote de horas",
-          temCota
-            ? "Tem contrato com cota — este gatilho é para quem só compra avulso."
-            : `${h(horasNoMes)} no mês, abaixo do limiar de ${PARAMS.limiarHorasAvulso}h.`),
-  );
+  const fechados = new Set(ultimosMesesFechados(12));
+  const serie = mensais
+    .filter((m) => fechados.has(m.mesKey))
+    .map((m) => ({ mesKey: m.mesKey, valor: money(m.receita.toString()) }));
 
-  // ── PRIMEIRO_EVENTO · regra 5 ───────────────────────────────────────────
-  const primeira = bookings.find((b) => b.dataLocal)?.dataLocal ?? null;
-  const estreou = primeiraReserva({
-    primeiraReservaEm: primeira,
-    hoje,
-    dataDeCorte: keyToUtcDate(PARAMS.primeiraReservaDesde),
-    toleranciaDias: PARAMS.toleranciaMarcoDias,
-  });
   /**
    * O cliente já comprou SeaBox?
    *
    * ⚠ Duas vias, com procedências diferentes (ver `posseDoProduto`):
    *
-   * - **compra** — agora RESPONDÍVEL. O catálogo real mostra que o SeaBox tem
-   *   categoria de serviço própria no Conexa, então basta olhar a categoria do
-   *   produto vendido. Antes eu passava um `produtoAlvo: -1` de mentira aqui,
-   *   e a resposta era sempre "desconhecido".
+   * - **compra** — RESPONDÍVEL: o SeaBox tem categoria de serviço própria no
+   *   Conexa, então basta olhar a categoria do produto vendido.
    * - **cortesia** — segue sem resposta: quais planos embutem SeaBox não existe
    *   na API, é cadastro.
    *
    * Então quem COMPROU recebe um veredicto definitivo (não ofertar); quem não
    * comprou continua ambíguo, porque pode ter recebido de cortesia.
    */
-  const produtosSeaBox = compradas.length
+  const compradas = [...new Set(vendas.map((v) => v.productConexaId).filter((x): x is number => x !== null))];
+  const produtosComprados = compradas.length
     ? await prisma.product.findMany({
         where: { conexaId: { in: compradas } },
         select: { conexaId: true, serviceCategoryConexaId: true },
       })
     : [];
   const catsDosComprados = [
-    ...new Set(produtosSeaBox.map((p) => p.serviceCategoryConexaId).filter((x): x is number => x !== null)),
+    ...new Set(produtosComprados.map((p) => p.serviceCategoryConexaId).filter((x): x is number => x !== null)),
   ];
   const catsSeaBox = catsDosComprados.length
     ? await prisma.serviceCategory.findMany({
@@ -237,9 +200,9 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
       })
     : [];
   const idsCatSeaBox = new Set(
-    catsSeaBox.filter((c) => ehSegmentoSeaBox(c.name)).map((c) => c.conexaId),
+    catsSeaBox.filter((c) => segmentos.ehSeaBox(c.conexaId, c.name)).map((c) => c.conexaId),
   );
-  const comprouSeaBox = produtosSeaBox.some(
+  const comprouSeaBox = produtosComprados.some(
     (p) => p.serviceCategoryConexaId !== null && idsCatSeaBox.has(p.serviceCategoryConexaId),
   );
 
@@ -251,168 +214,359 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
    * Eu só olhava `/sales`. Um cliente com contrato de SeaBox ativo receberia a
    * oferta de SeaBox — a reoferta exata que a supressão existe para impedir.
    */
-  const temContratoSeaBox = contratos.some((c) => ehSegmentoSeaBox(categoriaDo(c.planConexaId)));
+  const temContratoSeaBox = contratos.some((c) => {
+    const cat = categoriaDo(c.planConexaId);
+    return segmentos.ehSeaBox(cat.id, cat.nome);
+  });
 
   const posseSeabox =
     comprouSeaBox || temContratoSeaBox
       ? ("POR_COMPRA" as const)
       : posseDoProduto({ produtoAlvo: -1, comprados: [], cortesiasDoPlano: null });
-  sinais.push(
-    !estreou
-      ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-          primeira
-            ? `Primeira reserva em ${fmtDia(primeira)} — fora da janela de estreia.`
-            : "Cliente nunca reservou sala.")
-      : // ⚠ Já comprou SeaBox → NÃO ofertar. É a supressão funcionando, e o
-        // estado certo é "não aplicável", não "ativo": a regra existe, mas esta
-        // oferta específica já foi atendida.
-        posseSeabox === "POR_COMPRA"
-        ? sem("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-            `Estreou em ${fmtDia(primeira!)}, mas o cliente JÁ TEM SeaBox (${
-              temContratoSeaBox ? "contrato ativo" : "compra registrada"
-            }) — não reofertar.`)
-        : ambiguo("5", "Primeira reserva de sala", "PRIMEIRO_EVENTO", "Endereço Fiscal + SeaBox",
-            `Estreou em ${fmtDia(primeira!)}. Não comprou SeaBox, mas não dá para saber se o plano dele já embute de cortesia — esse mapeamento não existe na API.`,
-            `estreia em ${fmtDia(primeira!)}`),
-  );
 
-  // ── EVENTO_EM_SEGMENTO · regra 10 ───────────────────────────────────────
-  const litoral = contratos.some((c) => {
-    if (!ehSegmentoFiscal(categoriaDo(c.planConexaId))) return false;
-    const p = c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined;
-    return p?.horasInclusasMes == null; // sem cota = Litoral (Fase 0)
-  });
-  const reservasNoMes = bookings.filter(
-    (b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual,
-  ).length;
+  const planoSemCota = (planConexaId: number | null) => {
+    const p = planConexaId !== null ? planoPor.get(planConexaId) : undefined;
+    return p?.horasInclusasMes == null;
+  };
 
-  sinais.push(
-    litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: reservasNoMes })
-      ? ativo("10", "Litoral reserva sala", "EVENTO_EM_SEGMENTO", "Pacote de Horas ou upgrade para Batial",
-          `Endereço Fiscal sem horas inclusas, com ${reservasNoMes} reserva(s) em ${mesAtual}.`,
-          `${reservasNoMes} reserva(s)`)
-      : sem("10", "Litoral reserva sala", "EVENTO_EM_SEGMENTO", "Pacote de Horas ou upgrade para Batial",
-          litoral ? `Nenhuma reserva em ${mesAtual}.` : "Não tem plano de Endereço Fiscal sem cota."),
-  );
+  const ctx: ContextoDoCliente = {
+    hoje,
+    mesAtual,
+    contratos: contratos.map((c) => ({
+      conexaId: c.conexaId,
+      planConexaId: c.planConexaId,
+      startDate: c.startDate,
+    })),
+    categoriaDo,
+    planoSemCota,
+    segmentos,
+    horas,
+    horasNoMes,
+    reservasNoMes,
+    primeiraReservaEm,
+    serie,
+    posseSeabox,
+    temContratoSeaBox,
+  };
 
-  // ── TENDENCIA · regra 3 e a métrica do §1 ───────────────────────────────
-  const fechados = new Set(ultimosMesesFechados(12));
-  const serie = mensais
-    .filter((m) => fechados.has(m.mesKey))
-    .map((m) => ({ mesKey: m.mesKey, valor: money(m.receita.toString()) }));
-
-  const queda = quedaMesAMes({ serie, quedasSeguidas: PARAMS.quedasSeguidas });
-  sinais.push(
-    queda.disparou
-      ? ambiguo("3", "Padrão de compra irregular", "TENDENCIA", "novo pacote",
-          `Receita caiu em ${queda.quedas} meses seguidos (${queda.de} → ${queda.ate}). ⚠ Avaliado sobre RECEITA: falta o cliente definir se "comprou 20h" é compra ou consumo — vêm de endpoints diferentes.`,
-          `${queda.quedas} quedas seguidas`)
-      : sem("3", "Padrão de compra irregular", "TENDENCIA", "novo pacote",
-          serie.length < PARAMS.quedasSeguidas + 1
-            ? "Série curta demais para avaliar tendência."
-            : `Sem ${PARAMS.quedasSeguidas} quedas seguidas nos meses fechados.`),
-  );
-
-  const ult = serie.at(-1);
-  const pen = serie.at(-2);
-  const pct = ult && pen ? quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: PARAMS.limiarQuedaPct }) : null;
-  sinais.push(
-    !pct
-      ? indisponivel("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-          "Sem dois meses fechados para comparar.")
-      : pct.variacaoPct === null
-        ? sem("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-            "Mês anterior sem receita — não existe base de comparação. Não é queda de 100%.")
-        : pct.disparou
-          ? ativo("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-              `Caiu ${num(Math.abs(pct.variacaoPct))}% de ${pen!.mesKey} para ${ult!.mesKey}. ⚠ Limiar de ${PARAMS.limiarQuedaPct}% é exemplo, não decisão do cliente.`,
-              `${num(pct.variacaoPct)}%`)
-          : sem("métrica", "Queda de receita", "TENDENCIA", "olhar antes que o cliente saia",
-              // ⚠ Subir NÃO é "dentro do limiar de queda". A mensagem anterior
-              // dizia "variação de 77.4%, dentro do limiar de 30%" para um
-              // cliente que CRESCEU 77% — número certo, motivo mentiroso.
-              pct.variacaoPct > 0
-                ? `Subiu ${num(pct.variacaoPct)}% de ${pen!.mesKey} para ${ult!.mesKey} — não é queda.`
-                : `Caiu ${num(Math.abs(pct.variacaoPct))}%, dentro do limiar de ${PARAMS.limiarQuedaPct}%.`),
-  );
-
-  // ── SALDO_COTA · regras 2 e 9 ───────────────────────────────────────────
-  //
-  // ⚠ NÃO é "conferência pendente". Medido em 2026-08-27 contra produção: a
-  // hora que falta vem de pacote recorrente (`recurringSales.packageId`), e
-  // `/packages`, `/package/:id` e `/hourPackages` respondem **404 por
-  // permissão**. Não existe caminho pela API — nenhuma conferência muda isso.
-  //
-  // O texto anterior mandava o vendedor esperar um trabalho nosso que não
-  // existe. Dizer "depende do admin do Conexa" é a diferença entre alguém
-  // pedir a liberação e alguém esperar para sempre.
-  for (const [regra, nome] of [["2", "Pacote de horas acabando"], ["9", "Pacote abaixo de 5h"]] as const) {
-    sinais.push(indisponivel(regra, nome, "SALDO_COTA", "novo pacote",
-      "As horas do pacote comprado vêm de `recurringSales.packageId`, e `/packages` responde 404 por permissão deste token. O saldo não é calculável — depende de o admin do Conexa liberar o endpoint."));
-  }
-
-  const ordem = ["extra", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "métrica"];
-  return sinais.sort((a, b) => ordem.indexOf(a.regra) - ordem.indexOf(b.regra));
+  // A ordem é a do catálogo (`ordem`), já aplicada por `carregarGatilhos`.
+  return gatilhos.todos.map((g) => avaliarGatilho(g, ctx));
 }
 
-// ── construtores, só para a lista acima ficar legível ─────────────────────
-const mk = (estado: EstadoSinal) =>
-  (regra: string, nome: string, familia: string, oferta: string, motivo: string, evidencia?: string): Sinal =>
-    ({ regra, nome, familia, oferta, estado, motivo, evidencia });
+// ---------------------------------------------------------------------------
+// Despacho por família
+// ---------------------------------------------------------------------------
 
-const ativo = mk("ATIVO");
-const sem = mk("NAO_APLICAVEL");
-const indisponivel = mk("DADO_INDISPONIVEL");
-const ambiguo = mk("AMBIGUO");
+function avaliarGatilho(g: GatilhoResolvido, ctx: ContextoDoCliente): Sinal {
+  const base = { regra: g.codigo, nome: g.nome, familia: g.familia, oferta: g.oferta };
+
+  // ⚠ Bloqueio vence desligamento. Um gatilho bloqueado por permissão não muda
+  // de comportamento quando alguém o liga; dizer "desligado" esconderia que o
+  // problema está fora daqui — e mandaria a pessoa procurar o botão errado.
+  if (g.bloqueio) {
+    return { ...base, estado: "DADO_INDISPONIVEL", motivo: g.bloqueio };
+  }
+  if (!g.ativo) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      desligado: true,
+      motivo:
+        "Gatilho desligado na tela Gatilhos" +
+        (g.atualizadoPor ? ` por ${g.atualizadoPor}` : "") +
+        (g.atualizadoEm ? ` em ${fmtDia(g.atualizadoEm)}` : "") +
+        " — não é uma conclusão sobre este cliente.",
+    };
+  }
+  if (g.problemaNosParams) {
+    return {
+      ...base,
+      estado: "DADO_INDISPONIVEL",
+      motivo: `Parâmetros ilegíveis (${g.problemaNosParams}) — avaliado com os valores de fábrica.`,
+    };
+  }
+
+  switch (g.familia) {
+    case "EXCEDENTE":
+      return excedente(g, ctx, base);
+    case "MARCO_CONTRATO":
+      return marco(g, ctx, base);
+    case "USO_SEM_COTA":
+      return usoSemCota(g, ctx, base);
+    case "PRIMEIRO_EVENTO":
+      return primeiroEvento(g, ctx, base);
+    case "EVENTO_EM_SEGMENTO":
+      return eventoEmSegmento(g, ctx, base);
+    case "TENDENCIA":
+      return tendencia(g, ctx, base);
+    case "SALDO_COTA":
+      return {
+        ...base,
+        estado: "DADO_INDISPONIVEL",
+        motivo:
+          "As horas do pacote comprado vêm de `recurringSales.packageId`, e `/packages` responde " +
+          "404 por permissão deste token. O saldo não é calculável — depende de o admin do Conexa " +
+          "liberar o endpoint.",
+      };
+  }
+}
+
+type Base = Pick<Sinal, "regra" | "nome" | "familia" | "oferta">;
+
+function excedente(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const { horas } = ctx;
+  if (horas.semContrato) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: "Cliente sem contrato ativo com plano — não há cota a estourar.",
+    };
+  }
+  if (horas.atribuicaoAmbigua) {
+    return {
+      ...base,
+      estado: "AMBIGUO",
+      motivo: "Mais de um contrato com cota: a reserva não diz de qual balde a hora saiu.",
+    };
+  }
+  if (horas.sinal?.recorrente) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Estourou em ${horas.sinal.ciclosComEstouro} de ${horas.sinal.ciclosConclusivos} ciclos conclusivos.`,
+      evidencia: `${h(horas.sinal.horasExcedentes)} pagas por fora do plano`,
+    };
+  }
+  const p = lerParams("EXCEDENTE", g.params).params;
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: horas.sinal
+      ? `Estourou em ${horas.sinal.ciclosComEstouro} de ${horas.sinal.ciclosConclusivos} ciclos — o gatilho exige ${p.ciclosComEstouro}.`
+      : "Sem ciclos fechados suficientes para avaliar.",
+  };
+}
+
+function marco(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("MARCO_CONTRATO", g.params).params;
+  const rotuloSeg =
+    p.segmento === "SALA_PRIVATIVA"
+      ? "sala privativa"
+      : p.segmento === "ENDERECO_FISCAL"
+        ? "Endereço Fiscal"
+        : p.segmento === "SEABOX"
+          ? "SeaBox"
+          : null;
+
+  const candidatos = ctx.contratos.filter((c) => {
+    if (p.segmento === "QUALQUER") return true;
+    const cat = ctx.categoriaDo(c.planConexaId);
+    return ctx.segmentos.de(cat.id, cat.nome) === p.segmento;
+  });
+
+  const plural = p.meses === 1 ? "mês" : "meses";
+
+  if (!candidatos.length) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: rotuloSeg
+        ? `Nenhum contrato ativo de ${rotuloSeg}.`
+        : "Nenhum contrato ativo.",
+    };
+  }
+
+  const semData = candidatos.filter((c) => !c.startDate);
+  const atingiu = candidatos.find(
+    (c) =>
+      c.startDate &&
+      marcoAtingido({
+        inicio: c.startDate,
+        meses: p.meses,
+        hoje: ctx.hoje,
+        toleranciaDias: p.toleranciaDias,
+      }),
+  );
+
+  if (atingiu) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Contrato #${atingiu.conexaId} completou ${p.meses} ${plural} (âncora startDate).`,
+      evidencia: `desde ${fmtDia(atingiu.startDate!)}`,
+    };
+  }
+  if (semData.length === candidatos.length) {
+    return {
+      ...base,
+      estado: "DADO_INDISPONIVEL",
+      motivo: "Contrato sem `startDate` — não há de onde contar o marco.",
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: `Nenhum contrato no marco de ${p.meses} ${plural} hoje.`,
+  };
+}
+
+function usoSemCota(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("USO_SEM_COTA", g.params).params;
+  const temCota = ctx.horas.contratos.some((c) => c.concedido !== null);
+
+  if (usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: ctx.horasNoMes, limiarHoras: p.limiarHoras })) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Sem contrato com cota e ${h(ctx.horasNoMes)} usadas em ${ctx.mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
+      evidencia: `${h(ctx.horasNoMes)} no mês`,
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: temCota
+      ? "Tem contrato com cota — este gatilho é para quem só compra avulso."
+      : `${h(ctx.horasNoMes)} no mês, abaixo do limiar de ${p.limiarHoras}h.`,
+  };
+}
+
+function primeiroEvento(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("PRIMEIRO_EVENTO", g.params).params;
+  const estreou = primeiraReserva({
+    primeiraReservaEm: ctx.primeiraReservaEm,
+    hoje: ctx.hoje,
+    dataDeCorte: keyToUtcDate(p.desde),
+    toleranciaDias: p.toleranciaDias,
+  });
+
+  if (!estreou) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: ctx.primeiraReservaEm
+        ? `Primeira reserva em ${fmtDia(ctx.primeiraReservaEm)} — fora da janela de estreia (corte em ${p.desde}).`
+        : "Cliente nunca reservou sala.",
+    };
+  }
+
+  // ⚠ Já tem SeaBox → NÃO ofertar. É a supressão funcionando, e o estado certo
+  // é "não aplicável", não "ativo": a regra existe, mas esta oferta específica
+  // já foi atendida.
+  if (ctx.posseSeabox === "POR_COMPRA") {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: `Estreou em ${fmtDia(ctx.primeiraReservaEm!)}, mas o cliente JÁ TEM SeaBox (${
+        ctx.temContratoSeaBox ? "contrato ativo" : "compra registrada"
+      }) — não reofertar.`,
+    };
+  }
+
+  return {
+    ...base,
+    estado: "AMBIGUO",
+    motivo: `Estreou em ${fmtDia(ctx.primeiraReservaEm!)}. Não comprou SeaBox, mas não dá para saber se o plano dele já embute de cortesia — esse mapeamento não existe na API.`,
+    evidencia: `estreia em ${fmtDia(ctx.primeiraReservaEm!)}`,
+  };
+}
+
+function eventoEmSegmento(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("EVENTO_EM_SEGMENTO", g.params).params;
+
+  // ⚠ O tier vem da COTA do plano, nunca do nome: Litoral = sem cota,
+  // Batial = 2h, Abissal = 8h, medido na Fase 0.
+  const litoral = ctx.contratos.some((c) => {
+    const cat = ctx.categoriaDo(c.planConexaId);
+    if (!ctx.segmentos.ehFiscal(cat.id, cat.nome)) return false;
+    return ctx.planoSemCota(c.planConexaId);
+  });
+
+  if (
+    litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: ctx.reservasNoMes }) &&
+    ctx.reservasNoMes >= p.reservasMinimas
+  ) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Endereço Fiscal sem horas inclusas, com ${ctx.reservasNoMes} reserva(s) em ${ctx.mesAtual}.`,
+      evidencia: `${ctx.reservasNoMes} reserva(s)`,
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: litoral
+      ? `${ctx.reservasNoMes} reserva(s) em ${ctx.mesAtual}, abaixo do mínimo de ${p.reservasMinimas}.`
+      : "Não tem plano de Endereço Fiscal sem cota.",
+  };
+}
+
+function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("TENDENCIA", g.params).params;
+
+  if (p.modo === "quedas_seguidas") {
+    const queda = quedaMesAMes({ serie: ctx.serie, quedasSeguidas: p.quedasSeguidas });
+    if (queda.disparou) {
+      return {
+        ...base,
+        // ⚠ AMBIGUO e não ATIVO: avaliado sobre RECEITA, e falta o cliente
+        // definir se "comprou 20h" é compra ou consumo — vêm de endpoints
+        // diferentes.
+        estado: "AMBIGUO",
+        motivo: `Receita caiu em ${queda.quedas} meses seguidos (${queda.de} → ${queda.ate}). ⚠ Avaliado sobre RECEITA: falta o cliente definir se "comprou 20h" é compra ou consumo.`,
+        evidencia: `${queda.quedas} quedas seguidas`,
+      };
+    }
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo:
+        ctx.serie.length < p.quedasSeguidas + 1
+          ? "Série curta demais para avaliar tendência."
+          : `Sem ${p.quedasSeguidas} quedas seguidas nos meses fechados.`,
+    };
+  }
+
+  const ult = ctx.serie.at(-1);
+  const pen = ctx.serie.at(-2);
+  if (!ult || !pen) {
+    return {
+      ...base,
+      estado: "DADO_INDISPONIVEL",
+      motivo: "Sem dois meses fechados para comparar.",
+    };
+  }
+
+  const pct = quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: p.limiarPct });
+  if (pct.variacaoPct === null) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: "Mês anterior sem receita — não existe base de comparação. Não é queda de 100%.",
+    };
+  }
+  if (pct.disparou) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Caiu ${num(Math.abs(pct.variacaoPct))}% de ${pen.mesKey} para ${ult.mesKey} (limiar de ${p.limiarPct}%).`,
+      evidencia: `${num(pct.variacaoPct)}%`,
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    // ⚠ Subir NÃO é "dentro do limiar de queda". A mensagem anterior dizia
+    // "variação de 77.4%, dentro do limiar de 30%" para um cliente que CRESCEU
+    // 77% — número certo, motivo mentiroso.
+    motivo:
+      pct.variacaoPct > 0
+        ? `Subiu ${num(pct.variacaoPct)}% de ${pen.mesKey} para ${ult.mesKey} — não é queda.`
+        : `Caiu ${num(Math.abs(pct.variacaoPct))}%, dentro do limiar de ${p.limiarPct}%.`,
+  };
+}
 
 function fmtDia(d: Date): string {
   return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(d);
-}
-
-/**
- * COMO CADA CATEGORIA DO CONEXA ESTÁ SENDO CLASSIFICADA.
- *
- * ⚠ Existe para tornar VISÍVEL uma falha que seria silenciosa. As regras 1, 6,
- * 7, 8 e 10 dependem de casar o nome da categoria de serviço; se a Seahub
- * renomear "Salas Privativas - Seaway Center", as três regras de marco de
- * privativa simplesmente param de encontrar contrato — sem erro, sem alerta,
- * sem nada na tela. Só uma fila que encolhe e ninguém sabe por quê.
- *
- * O projeto irmão em produção tem exatamente esse tipo de defeito registrado no
- * ADR-0017 dele: DUAS grafias da mesma categoria convivendo (uma com espaço
- * duplo), partindo a receita em duas no relatório que agrupa por string exata.
- * Achado só quando alguém foi implementar outra coisa.
- *
- * Aqui o casamento é por substring, então espaço duplo não quebra. Mas renomear
- * quebra — e é isso que esta lista deixa à vista.
- */
-export interface CategoriaClassificada {
-  conexaId: number;
-  nome: string;
-  privativa: boolean;
-  fiscal: boolean;
-  seabox: boolean;
-  /** Quantos planos usam esta categoria. Zero = categoria sem uso. */
-  planos: number;
-}
-
-export async function classificacaoDeCategorias(): Promise<CategoriaClassificada[]> {
-  const [categorias, planos] = await Promise.all([
-    prisma.serviceCategory.findMany({ orderBy: { name: "asc" } }),
-    prisma.plan.groupBy({ by: ["serviceCategoryConexaId"], _count: true }),
-  ]);
-  const usoPor = new Map(
-    planos
-      .filter((p) => p.serviceCategoryConexaId !== null)
-      .map((p) => [p.serviceCategoryConexaId!, p._count]),
-  );
-
-  return categorias.map((c) => ({
-    conexaId: c.conexaId,
-    nome: c.name ?? `categoria ${c.conexaId}`,
-    privativa: ehSegmentoPrivativa(c.name),
-    fiscal: ehSegmentoFiscal(c.name),
-    seabox: ehSegmentoSeaBox(c.name),
-    planos: usoPor.get(c.conexaId) ?? 0,
-  }));
 }

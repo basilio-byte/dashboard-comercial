@@ -73,6 +73,21 @@ export interface HorasDoCliente {
 const CICLOS_ANALISADOS = 3;
 
 /**
+ * Os limiares do gatilho de excedente, vindos da configuração.
+ *
+ * ⚠ Opcionais, e os defaults são os valores de sempre: quem chama sem passar
+ * nada obtém exatamente o comportamento anterior. É isso que permite ligar a
+ * configuração sem exigir que o banco tenha linha nenhuma — ver
+ * `src/lib/regras/config.ts`.
+ */
+export interface OpcoesDeExcedente {
+  /** Quantos ciclos fechados olhar. */
+  ciclosAnalisados?: number;
+  /** Em quantos deles precisa ter estourado para ser "recorrente". */
+  ciclosComEstouro?: number;
+}
+
+/**
  * A concessão de horas do contrato, com procedência.
  *
  * ⚠ **O contrato manda, o plano é o padrão.** `plan.hourQuotas` é a cota do
@@ -104,7 +119,9 @@ function concessaoDoContrato(
 export async function horasDoCliente(
   customerConexaId: number,
   ref: Date = nowInAppTz(),
+  opts: OpcoesDeExcedente = {},
 ): Promise<HorasDoCliente> {
+  const nCiclos = opts.ciclosAnalisados ?? CICLOS_ANALISADOS;
   // ⚠ NORMALIZA para data-calendário em meia-noite UTC.
   //
   // `cicloVigente` lê `getUTCDate()/getUTCMonth()`, mas `nowInAppTz()` é um
@@ -150,7 +167,7 @@ export async function horasDoCliente(
   const bordas: Date[] = [];
   for (const c of contratos) {
     if (!c.startDate) continue;
-    const cs = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS);
+    const cs = ciclosFechados(c.startDate, refDia, nCiclos);
     const v = cicloVigente(c.startDate, refDia);
     if (cs.length) bordas.push(cs[0]!.inicio);
     if (v) bordas.push(v.fimExclusivo);
@@ -194,7 +211,7 @@ export async function horasDoCliente(
       continue;
     }
 
-    const fechadosCiclos = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS);
+    const fechadosCiclos = ciclosFechados(c.startDate, refDia, nCiclos);
     const vigente = cicloVigente(c.startDate, refDia);
     const fechados = fechadosCiclos.map((j) => consolidarCiclo(j, paraConsumo, concedido));
 
@@ -208,7 +225,7 @@ export async function horasDoCliente(
       fechados,
       // O sinal olha só os ciclos FECHADOS: o vigente está pela metade, e um
       // estouro "ainda não acontecido" não é sinal.
-      sinal: fechados.length ? avaliarExcedente(fechados) : null,
+      sinal: fechados.length ? avaliarExcedente(fechados, { minCiclosComEstouro: opts.ciclosComEstouro }) : null,
     });
   }
 
@@ -257,7 +274,9 @@ export interface FilaExcedente {
 
 export async function clientesComExcedente(
   ref: Date = nowInAppTz(),
+  opts: OpcoesDeExcedente = {},
 ): Promise<FilaExcedente> {
+  const nCiclos = opts.ciclosAnalisados ?? CICLOS_ANALISADOS;
   // ⚠ GATE. Esta função é a porta de entrada da fila que vira task no ClickUp,
   // e era a única do caminho sem selo de completude — a proteção existia só
   // onde um humano olha. Devolver lista vazia seria pior: vazio é
@@ -328,7 +347,7 @@ export async function clientesComExcedente(
   for (const lista of porCliente.values()) {
     for (const c of lista) {
       if (!c.startDate) continue;
-      const cs = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS);
+      const cs = ciclosFechados(c.startDate, refDia, nCiclos);
       const v = cicloVigente(c.startDate, refDia);
       if (cs.length) bordas.push(cs[0]!.inicio.getTime());
       if (v) bordas.push(v.fimExclusivo.getTime());
@@ -389,7 +408,7 @@ export async function clientesComExcedente(
       const { concedido, origem: origemDaCota } = concessaoDoContrato(c, plano);
       if (!c.startDate) continue;
 
-      const fechados = ciclosFechados(c.startDate, refDia, CICLOS_ANALISADOS).map((j) =>
+      const fechados = ciclosFechados(c.startDate, refDia, nCiclos).map((j) =>
         consolidarCiclo(j, doCliente, concedido),
       );
       const vigente = cicloVigente(c.startDate, refDia);
@@ -403,7 +422,7 @@ export async function clientesComExcedente(
         fechados,
         // Só ciclos FECHADOS: o vigente está pela metade, e um estouro "ainda
         // não acontecido" não é sinal.
-        sinal: fechados.length ? avaliarExcedente(fechados) : null,
+        sinal: fechados.length ? avaliarExcedente(fechados, { minCiclosComEstouro: opts.ciclosComEstouro }) : null,
       });
     }
 

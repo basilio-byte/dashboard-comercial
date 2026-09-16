@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { dataHoraLocal } from "@/lib/dates";
+import { carregarGatilhos } from "@/lib/regras/config";
+import { listarAgentes } from "@/lib/operacao/agentes";
 import { Painel, Rolante, Secao } from "@/components/Cartao";
 import { FormularioContato, RESULTADO_ESTILO } from "./formulario-contato";
 import { cn } from "@/lib/ui";
@@ -13,11 +15,28 @@ import { cn } from "@/lib/ui";
  * ofertamos isso a ele?".
  */
 export async function Contatos({ customerConexaId }: { customerConexaId: number }) {
-  const contatos = await prisma.contato.findMany({
-    where: { customerConexaId },
-    orderBy: { contatoEm: "desc" },
-    take: 20,
-  });
+  const [contatos, agentes, gatilhos] = await Promise.all([
+    prisma.contato.findMany({
+      where: { customerConexaId },
+      orderBy: { contatoEm: "desc" },
+      take: 20,
+    }),
+    listarAgentes(),
+    carregarGatilhos(),
+  ]);
+
+  /**
+   * ⚠ A lista de motivos vem da CONFIGURAÇÃO, não de um array escrito na tela.
+   *
+   * Ela era escrita à mão no formulário e já nascia incompleta: não tinha as
+   * regras 2 e 9, e nunca teria um gatilho criado pela tela. O vendedor
+   * registraria "sem regra específica" para um sinal que existe — e o histórico
+   * perderia justamente a informação que impede a reoferta.
+   */
+  const regras = gatilhos.todos.map((g) => ({
+    v: g.codigo,
+    r: `${g.codigo === "extra" || g.codigo === "métrica" ? g.codigo : `regra ${g.codigo}`} · ${g.nome}`,
+  }));
 
   const ultimo = contatos[0];
 
@@ -35,7 +54,11 @@ export async function Contatos({ customerConexaId }: { customerConexaId: number 
         )
       }
     >
-      <FormularioContato customerConexaId={customerConexaId} />
+      <FormularioContato
+        customerConexaId={customerConexaId}
+        agentes={agentes.map((a) => ({ id: a.id, nome: a.nome }))}
+        regras={regras}
+      />
 
       {contatos.length > 0 ? (
         <Painel

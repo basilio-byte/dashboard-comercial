@@ -1,34 +1,51 @@
-import { classificacaoDeCategorias } from "@/lib/regras/avaliar";
-import { Faixa, Nota, Painel, Rolante, Secao } from "@/components/Cartao";
+import {
+  lerCategorias,
+  REGRAS_DO_SEGMENTO,
+  ROTULO_SEGMENTO,
+  SEGMENTOS,
+} from "@/lib/regras/segmentos";
+import { Faixa, Nota, Secao } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
+import { EditorDeCategorias } from "./categorias-editor";
 
 /**
- * Como cada categoria de serviço do Conexa está sendo classificada.
+ * Como cada categoria de serviço do Conexa é lida — e onde se corrige.
  *
  * ⚠ Existe para tornar VISÍVEL uma falha que seria silenciosa. As regras 1, 6,
- * 7, 8 e 10 dependem de casar o nome da categoria; se a Seahub renomear "Salas
- * Privativas - Seaway Center", as três regras de marco de privativa param de
- * encontrar contrato — sem erro, sem alerta, sem nada na tela. Só uma fila que
- * encolhe e ninguém sabe por quê.
+ * 7, 8 e 10 dependem de reconhecer o segmento da categoria; se a Seahub
+ * renomear "Salas Privativas - Seaway Center", as três regras de marco de
+ * privativa param de encontrar contrato — sem erro, sem alerta, sem nada na
+ * tela. Só uma fila que encolhe e ninguém sabe por quê.
  *
  * O projeto irmão em produção tem esse tipo de defeito registrado (ADR-0017 de
  * lá): duas grafias da mesma categoria convivendo, uma com espaço duplo,
  * partindo a receita em duas no relatório que agrupa por string exata — achado
  * por acaso, meses depois, enquanto alguém implementava outra coisa.
+ *
+ * ⚠ **Desde 2026-09-16 dá para classificar à mão**, que é o pedido do Diego
+ * ("Meu Depósito", "Serviços de Espaço - Ayrton Senna"...). E isso não é só
+ * conveniência: a classificação manual é **por id**, e id não muda quando o
+ * nome muda. Classificar uma categoria é o que faz renomear deixar de quebrar.
  */
-export async function CategoriasClassificadas() {
-  const cats = await classificacaoDeCategorias();
+export async function CategoriasClassificadas({ podeEditar }: { podeEditar: boolean }) {
+  const cats = await lerCategorias();
   const emUso = cats.filter((c) => c.planos > 0);
-  const classificadas = emUso.filter((c) => c.privativa || c.fiscal || c.seabox);
-  const orfas = emUso.filter((c) => !c.privativa && !c.fiscal && !c.seabox);
+  const classificadas = emUso.filter((c) => c.segmento !== null);
+  const manuais = emUso.filter((c) => c.origem === "MANUAL");
+  const orfas = emUso.filter((c) => c.segmento === null);
+  // Divergência entre o que alguém declarou e o que o nome sugere. Ou o Conexa
+  // renomeou, ou a classificação está errada — os dois merecem olhada.
+  const divergentes = manuais.filter(
+    (c) => c.sugestaoPeloNome !== null && c.sugestaoPeloNome !== c.segmento,
+  );
 
   return (
     <Secao
       titulo="Como as categorias são lidas"
-      sub="As regras de marco e de segmento casam pelo nome da categoria de serviço. Isto mostra o resultado desse casamento."
+      sub="As regras de marco e de segmento dependem de reconhecer a categoria de serviço do plano. Isto mostra — e corrige — esse reconhecimento."
       acao={
         <span className={cn("selo", classificadas.length > 0 ? "selo-info" : "selo-atencao")}>
-          {classificadas.length} de {emUso.length} classificadas
+          {classificadas.length} de {emUso.length} reconhecidas · {manuais.length} à mão
         </span>
       }
     >
@@ -40,68 +57,45 @@ export async function CategoriasClassificadas() {
         </Faixa>
       ) : null}
 
-      <Painel
-        rodape={
-          <>
-            Só aparecem categorias <strong>com plano associado</strong> — as demais não podem
-            classificar contrato. Um contrato numa categoria não reconhecida simplesmente não
-            aciona as regras de marco, e isso não é erro: é o sistema recusando adivinhar.
-          </>
-        }
-      >
-        <Rolante>
-          <table className="tabela">
-            <thead>
-              <tr>
-                <th>Categoria</th>
-                <th className="text-right">Planos</th>
-                <th>Lida como</th>
-                <th>Destrava</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...classificadas, ...orfas].map((c) => (
-                <tr key={c.conexaId}>
-                  <td>
-                    {/* ⚠ `whitespace-pre` de propósito: espaço duplo no nome é
-                        exatamente o defeito do ADR-0017 do irmão, e escondê-lo
-                        no HTML seria apagar a evidência. */}
-                    <span className="whitespace-pre font-medium">{c.nome}</span>
-                    <span className="num selo ml-2">#{c.conexaId}</span>
-                  </td>
-                  <td className="num text-right text-[var(--tinta-2)]">{c.planos}</td>
-                  <td>
-                    {c.privativa ? (
-                      <span className="selo selo-info">sala privativa</span>
-                    ) : c.fiscal ? (
-                      <span className="selo selo-info">endereço fiscal</span>
-                    ) : c.seabox ? (
-                      <span className="selo selo-bom">SeaBox</span>
-                    ) : (
-                      <span className="text-[var(--tinta-3)]">— não classificada</span>
-                    )}
-                  </td>
-                  <td className="text-[13px] text-[var(--tinta-3)]">
-                    {c.privativa
-                      ? "regras 6, 7 e 8"
-                      : c.fiscal
-                        ? "regras 1 e 10"
-                        : c.seabox
-                          ? "supressão das regras 5 e 7"
-                          : "nenhuma"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Rolante>
-      </Painel>
+      {divergentes.length > 0 ? (
+        <Faixa tom="atencao">
+          <strong>
+            {divergentes.length}{" "}
+            {divergentes.length === 1 ? "categoria classificada diverge" : "categorias classificadas divergem"}{" "}
+            do que o nome sugere.
+          </strong>{" "}
+          Ou o Conexa renomeou a categoria, ou a classificação está errada. As duas hipóteses
+          valem uma olhada:{" "}
+          {divergentes.map((c) => c.nome).join(", ")}.
+        </Faixa>
+      ) : null}
+
+      {orfas.length > 0 ? (
+        <Faixa tom="info">
+          <strong>
+            {orfas.length} {orfas.length === 1 ? "categoria em uso não é reconhecida" : "categorias em uso não são reconhecidas"}
+          </strong>{" "}
+          — contratos nelas não acionam regra de segmento. Isso não é erro: é o sistema recusando
+          adivinhar. Classifique-as abaixo para que passem a acionar, ou marque como{" "}
+          <strong>ignorar</strong> para registrar que foram olhadas.
+        </Faixa>
+      ) : null}
+
+      <EditorDeCategorias
+        categorias={cats}
+        segmentos={SEGMENTOS}
+        rotulos={ROTULO_SEGMENTO}
+        destrava={REGRAS_DO_SEGMENTO}
+        podeEditar={podeEditar}
+      />
 
       <Nota>
-        O casamento é por <strong>trecho do nome</strong> (&quot;privativ&quot;, &quot;fiscal&quot;,
-        &quot;seabox&quot;), sem acento e sem caixa — então grafia divergente e espaço duplo não
-        quebram. <strong>Renomear a categoria quebra</strong>, e é por isso que esta lista existe:
-        para a quebra aparecer aqui em vez de virar uma fila que encolhe sem explicação.
+        Sem classificação manual, o reconhecimento é por <strong>trecho do nome</strong>
+        (&quot;privativ&quot;, &quot;fiscal&quot;, &quot;seabox&quot;), sem acento e sem caixa —
+        então grafia divergente e espaço duplo não quebram, mas <strong>renomear quebra</strong>.
+        A classificação manual é por <strong>id</strong> e sobrevive à renomeação; ela vence a
+        heurística sempre. <strong>Ignorar</strong> é uma resposta (&quot;olhamos, não
+        interessa&quot;) e é diferente de não classificar, que é ausência de resposta.
       </Nota>
     </Secao>
   );

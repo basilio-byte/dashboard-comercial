@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Radar, Users, Zap, ShieldCheck, Cog, LogOut, type LucideIcon } from "lucide-react";
+import { Radar, Users, Zap, ShieldCheck, Cog, Contact, LogOut, type LucideIcon } from "lucide-react";
 import { sair } from "@/lib/auth/actions";
 import { cn, iniciais } from "@/lib/ui";
 import { Assinatura } from "./Logo";
@@ -40,6 +40,7 @@ export const SECOES: { titulo: string; itens: ItemNav[] }[] = [
     titulo: "Ajustar",
     itens: [
       { href: "/gatilhos", rotulo: "Gatilhos", Icone: Zap },
+      { href: "/agentes", rotulo: "Agentes", Icone: Contact },
       { href: "/confianca", rotulo: "Confiança", Icone: ShieldCheck },
       { href: "/motor", rotulo: "Motor", Icone: Cog },
     ],

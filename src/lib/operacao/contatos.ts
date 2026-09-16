@@ -35,13 +35,29 @@ export async function registrarContato(
   if (!u) return { erro: "Sessão expirada." };
 
   const customerConexaId = Number(form.get("customerConexaId"));
-  const quem = String(form.get("quem") ?? "").trim();
   const resultado = String(form.get("resultado") ?? "") as Resultado;
   const dia = String(form.get("contatoEm") ?? "").trim();
   const regra = String(form.get("regra") ?? "").trim() || null;
   const nota = String(form.get("nota") ?? "").trim() || null;
 
+  /**
+   * Quem falou: do cadastro de agentes, ou digitado.
+   *
+   * ⚠ `quem` continua sendo gravado como TEXTO mesmo quando veio do cadastro.
+   * É o que mantém o histórico legível se o agente for removido, e o que fez os
+   * contatos antigos — registrados quando o cadastro não existia — continuarem
+   * válidos sem nenhuma migração de dado que precisasse adivinhar a quem cada
+   * grafia se refere.
+   */
+  const agenteId = String(form.get("agenteId") ?? "").trim() || null;
+  let quem = String(form.get("quem") ?? "").trim();
+
   if (!Number.isInteger(customerConexaId)) return { erro: "Cliente inválido." };
+  if (agenteId) {
+    const agente = await prisma.agente.findUnique({ where: { id: agenteId } });
+    if (!agente) return { erro: "Agente não encontrado." };
+    quem = agente.nome;
+  }
   if (!quem) return { erro: "Informe quem fez o contato." };
   if (!RESULTADOS.includes(resultado)) return { erro: "Escolha o resultado." };
 
@@ -59,6 +75,7 @@ export async function registrarContato(
         customerConexaId,
         contatoEm,
         quem,
+        agenteId,
         resultado,
         regra,
         nota,

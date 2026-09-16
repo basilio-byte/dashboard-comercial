@@ -1,4 +1,4 @@
-import { CircleCheck, CircleDashed, CircleQuestionMark, TriangleAlert, type LucideIcon } from "lucide-react";
+import { CircleCheck, CircleDashed, CircleQuestionMark, PowerOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { sinaisDoCliente, type EstadoSinal } from "@/lib/regras/avaliar";
 import { Nota, Painel, Rolante, Secao } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
@@ -53,6 +53,7 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
   const sinais = await sinaisDoCliente(customerConexaId);
   const conta = (e: EstadoSinal) => sinais.filter((s) => s.estado === e).length;
   const ativos = conta("ATIVO");
+  const desligados = sinais.filter((x) => x.desligado).length;
 
   // Ativo e ambíguo primeiro: é o que o vendedor precisa ler. O resto é
   // contexto — e existe para "nenhum sinal" ser interpretável em vez de vazio.
@@ -63,7 +64,13 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
   return (
     <Secao
       titulo="Sinais automáticos"
-      sub={`As ${sinais.length} regras avaliadas contra os dados deste cliente, agora.`}
+      sub={
+        desligados > 0
+          ? `As ${sinais.length} regras configuradas, avaliadas contra os dados deste cliente — ${desligados} ${
+              desligados === 1 ? "está desligada" : "estão desligadas"
+            } e não conclui nada sobre ele.`
+          : `As ${sinais.length} regras configuradas, avaliadas contra os dados deste cliente, agora.`
+      }
       acao={
         <span className={cn("selo", ativos > 0 ? "selo-bom" : "")}>
           {ativos} {ativos === 1 ? "gatilho ativo" : "gatilhos ativos"}
@@ -136,9 +143,22 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
                     </td>
                     <td className="text-[var(--tinta-2)]">{s.oferta}</td>
                     <td>
-                      <span className={cn("selo whitespace-nowrap", e.selo)}>
-                        <e.Icone size={11.5} aria-hidden />
-                        {e.rotulo}
+                      <span className="flex flex-wrap items-center gap-1">
+                        <span className={cn("selo whitespace-nowrap", e.selo)}>
+                          <e.Icone size={11.5} aria-hidden />
+                          {e.rotulo}
+                        </span>
+                        {/* ⚠ Marca ao lado do estado, e não um quinto estado:
+                            os quatro são do documento do Diego. Mas "não
+                            aplicável" e "alguém desligou" parecem iguais e são
+                            opostos quando se investiga por que este cliente não
+                            entrou na fila. */}
+                        {s.desligado ? (
+                          <span className="selo selo-atencao whitespace-nowrap">
+                            <PowerOff size={11.5} aria-hidden />
+                            desligado
+                          </span>
+                        ) : null}
                       </span>
                     </td>
                     <td className="max-w-md text-[13px] leading-relaxed text-[var(--tinta-3)]">

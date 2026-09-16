@@ -564,10 +564,19 @@ model Contato {
   /// importa para o ciclo da oferta.
   contatoEm DateTime
 
-  /// Quem falou com o cliente. Texto livre porque **não existe cadastro de
-  /// vendedor** — e um nome digitado por uma pessoa vale mais que um cadastro
-  /// inventado. Vira `user_id` do ClickUp quando o CRM entrar.
+  /// Quem falou com o cliente, como TEXTO.
+  ///
+  /// ⚠ Continua obrigatório mesmo depois do cadastro de agentes existir, e o
+  /// motivo é histórico: os contatos registrados antes do cadastro só têm o
+  /// nome digitado, e transformá-los em referência exigiria adivinhar a quem
+  /// cada nome se refere. Então `quem` é sempre a verdade exibível, e
+  /// `agenteId` é o vínculo quando ele existe.
   quem String
+
+  /// O agente do cadastro, quando o contato foi registrado por um deles.
+  /// Nulo nos contatos antigos e nos de quem não está cadastrado.
+  agenteId String?
+  agente   Agente? @relation(fields: [agenteId], references: [id], onDelete: SetNull)
 
   /// Qual sinal motivou o contato: "extra", "1".."10", "métrica", ou nulo
   /// quando foi por outro motivo.
@@ -580,5 +589,195 @@ model Contato {
   registradoEm  DateTime @default(now())
 
   @@index([customerConexaId, contatoEm])
+  @@index([agenteId])
   @@map("contatos")
+}
+
+// ===========================================================================
+// Configuração OPERADA POR GENTE — agentes, gatilhos, categorias
+//
+// Tudo aqui existe porque o time comercial precisa mexer sem deploy. Ver
+// ADR-0009: configuração é dado, e env fica só para segredo e kill-switch.
+//
+// ⚠ Toda tabela desta seção grava QUEM mudou. Não é zelo: é configuração que
+// decide para quem o sistema aponta o vendedor — mudança sem rastro é um
+// gatilho que ninguém sabe quem desligou.
+// ===========================================================================
+
+/// AGENTE — quem usa a ferramenta.
+///
+/// Pedido do Diego em 2026-09-16: *"campo para cadastro de agentes (Diego,
+/// Guilherme...)"*.
+///
+/// ⚠ NÃO é o vendedor responsável do Conexa. Aquele é irresolvível: `/sellers`
+/// responde 404 por permissão, e o `sellerId` do contrato é o vendedor da
+/// ÉPOCA, não o de hoje. Este cadastro é dos nossos — quem trabalha a fila
+/// aqui dentro — e é o que `Contato.quem` vinha guardando como texto livre.
+///
+/// Os dois ids externos existem desde já porque o roster do disparo é
+/// exatamente isto (vendedor → clickupUserId → chatwootAgentId). Ficam nulos
+/// até o ClickUp entrar; cadastrá-los depois não exige migration.
+model Agente {
+  id      String  @id @default(cuid())
+  nome    String
+  /// Opcional de propósito: o time comercial tem gente sem e-mail corporativo.
+  email   String? @unique
+  apelido String?
+  ativo   Boolean @default(true)
+
+  /// Roster do disparo — ver ADR-0009 e a allowlist de destinos.
+  clickupUserId   String?
+  chatwootAgentId String?
+
+  observacao String?
+
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+  criadoPor    String?
+
+  contatos Contato[]
+
+  @@index([ativo])
+  @@map("agentes")
+}
+
+/// As famílias de regra que o código sabe avaliar (ADR-0007).
+///
+/// ⚠ Isto é a fronteira entre o que é DADO e o que é CÓDIGO. Um gatilho novo
+/// escolhe uma destas famílias e ajusta os parâmetros dela; não existe gatilho
+/// com lógica própria, porque lógica nova é função pura testada, não linha de
+/// tabela. Quem tentar criar um gatilho de família inexistente recebe erro.
+enum FamiliaRegra {
+  MARCO_CONTRATO /// completa N meses de contrato — regras 1, 6, 7, 8
+  TENDENCIA /// queda mês a mês ou queda percentual — regra 3 e a métrica
+  USO_SEM_COTA /// sem contrato com cota e usou mais que o limiar — regra 4
+  PRIMEIRO_EVENTO /// primeira reserva de sala — regra 5
+  EVENTO_EM_SEGMENTO /// Fiscal sem cota que reservou sala — regra 10
+  EXCEDENTE /// estoura a cota de horas com recorrência — o "extra"
+  SALDO_COTA /// saldo do pacote — regras 2 e 9, bloqueadas por permissão
+}
+
+/// GATILHO — a regra como DADO editável.
+///
+/// Pedido do Diego em 2026-09-16: *"campo editável para criar gatilhos"* e
+/// *"gatilhos com possibilidade de editar"*.
+///
+/// ⚠ O que é editável e o que não é:
+///
+/// - editável: ligar/desligar, os LIMIARES (`params`), o texto da oferta, o
+///   peso na ordenação da fila, a nota;
+/// - não editável: a FAMÍLIA de um gatilho nativo, porque trocá-la mudaria o
+///   significado de um código que já aparece em `Contato.regra` — o histórico
+///   de contatos passaria a apontar para outra pergunta.
+///
+/// ⚠ Mudar limiar levanta sempre "isso redispara o histórico?". A resposta
+/// aqui é NÃO: o motor não guarda disparo, avalia o estado de hoje. Quem
+/// apertar um limiar vê a fila mudar na próxima abertura da tela, e só.
+model Gatilho {
+  /// "1".."10", "extra", "métrica" para os nativos; "c_xxxx" para os criados
+  /// aqui dentro. É chave natural e aparece em `Contato.regra`.
+  codigo   String       @id
+  nome     String
+  familia  FamiliaRegra
+  /// O que ofertar quando dispara. Texto, porque o catálogo de oferta é do
+  /// comercial e não tem id estável no Conexa.
+  oferta   String
+  condicao String?
+  ativo    Boolean      @default(true)
+
+  /// Limiares da família, validados na leitura (`src/lib/regras/config.ts`).
+  /// Json e não colunas porque cada família tem os seus, e criar coluna por
+  /// limiar faria migration a cada gatilho novo.
+  params Json @default("{}")
+
+  /// Peso base na ordenação da fila — quanto maior, mais acima.
+  peso  Int @default(50)
+  ordem Int @default(0)
+
+  /// Nativo = veio do documento do Diego. Não pode ser removido, só desligado:
+  /// apagá-lo deixaria contatos históricos apontando para um código órfão.
+  nativo Boolean @default(true)
+  nota   String?
+
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+  atualizadoPor String?
+
+  @@index([ativo])
+  @@map("gatilhos")
+}
+
+/// Como uma categoria de serviço do Conexa deve ser lida.
+enum SegmentoCategoria {
+  SALA_PRIVATIVA
+  ENDERECO_FISCAL
+  SEABOX
+  DEPOSITO
+  SERVICOS_DE_ESPACO
+  OUTRO
+  /// Classificada como "não interessa a regra nenhuma" — diferente de não
+  /// classificada, que é ausência de resposta.
+  IGNORAR
+}
+
+/// CLASSIFICAÇÃO MANUAL DE CATEGORIA — o override do casamento por nome.
+///
+/// Pedido do Diego em 2026-09-16: *"classificar categorias (Meu Depósito,
+/// Serviços de Espaço - Ayrton Senna, Serviços de Espaço - Seaway Center,
+/// Serviços de Espaço - Sebrae)"*.
+///
+/// ⚠ Isto conserta um defeito estrutural, não só atende um pedido. O casamento
+/// por trecho de nome ("privativ", "fiscal", "seabox") **silencia sem avisar**
+/// quando a Seahub renomeia uma categoria: as regras 1, 6, 7, 8 e 10 param de
+/// encontrar contrato, a fila encolhe, e não há erro em lugar nenhum. Com uma
+/// classificação explícita por id, renomear deixa de quebrar — o id não muda.
+///
+/// A heurística de nome continua existindo como PADRÃO para o que ninguém
+/// classificou. A ordem é: manual vence, nome sugere, ausência não adivinha.
+model CategoriaClassificacao {
+  serviceCategoryConexaId Int               @id
+  segmento                SegmentoCategoria
+  /// Nome de exibição, quando o do Conexa for ruim. Não substitui o original.
+  rotulo                  String?
+  /// A unidade física, quando o nome a carrega ("- Ayrton Senna", "- Sebrae").
+  /// Manual porque derivar de sufixo de string é a mesma adivinhação que esta
+  /// tabela existe para eliminar.
+  unidade                 String?
+  nota                    String?
+
+  definidoPor  String?
+  definidoEm   DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@index([segmento])
+  @@index([unidade])
+  @@map("categoria_classificacoes")
+}
+
+/// RASTRO DE MUDANÇA DE CONFIGURAÇÃO.
+///
+/// ⚠ Existe porque a partir de agora há DOIS escritores: a tela e o MCP. Um
+/// agente de IA que altera limiar de gatilho sem deixar registro é
+/// indistinguível de um bug — e "quem desligou a regra 8?" precisa ter
+/// resposta. `origem` separa o que veio de gente do que veio de máquina.
+model MudancaDeConfig {
+  id       String @id @default(cuid())
+  /// "gatilho" | "agente" | "categoria"
+  entidade String
+  chave    String
+  /// "criou" | "alterou" | "removeu"
+  acao     String
+
+  antes  Json?
+  depois Json?
+
+  quem String?
+  /// UI | MCP | SISTEMA
+  origem String @default("UI")
+
+  em DateTime @default(now())
+
+  @@index([entidade, em])
+  @@index([em])
+  @@map("mudancas_de_config")
 }

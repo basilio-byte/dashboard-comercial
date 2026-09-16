@@ -39,6 +39,9 @@ function diaUtc(ano: number, mes: number, dia: number) {
 async function main() {
   console.log("[seed] limpando dados sintéticos anteriores…");
   await prisma.$transaction([
+    prisma.contato.deleteMany({ where: { customerConexaId: { gte: BASE } } }),
+    prisma.agente.deleteMany({ where: { criadoPor: "seed" } }),
+    prisma.categoriaClassificacao.deleteMany({ where: { serviceCategoryConexaId: { gte: BASE } } }),
     prisma.customerMonthlyRevenue.deleteMany({ where: { customerConexaId: { gte: BASE } } }),
     prisma.customerProfile.deleteMany({ where: { customerConexaId: { gte: BASE } } }),
     prisma.roomBooking.deleteMany({ where: { conexaId: { gte: BASE } } }),
@@ -67,6 +70,14 @@ async function main() {
     data: [
       { conexaId: BASE + 1, name: "Endereço Fiscal (demo)", raw: {} },
       { conexaId: BASE + 2, name: "Salas Privativas (demo)", raw: {} },
+      // ⚠ As duas abaixo existem para EXERCITAR a classificação manual: nenhuma
+      // casa com "privativ", "fiscal" ou "seabox", então a heurística de nome
+      // não as reconhece — que é exatamente a situação das categorias reais que
+      // o Diego citou ("Meu Depósito", "Serviços de Espaço - Sebrae").
+      // Sem elas, a tela de categorias abre com tudo já resolvido e a função
+      // nunca é testada por quem roda o seed.
+      { conexaId: BASE + 3, name: "Meu Depósito (demo)", raw: {} },
+      { conexaId: BASE + 4, name: "Serviços de Espaço - Sebrae (demo)", raw: {} },
     ],
   });
 
@@ -217,7 +228,79 @@ async function main() {
     data: { mode: "dimensions", status: "SUCCESS", finishedAt: new Date(), recordsWrote: perfis.length },
   });
 
+  // ---- agentes e contatos ------------------------------------------------
+  //
+  // Os nomes são os que o Diego citou no pedido de 2026-09-16. Um dos contatos
+  // é registrado SEM agente, de propósito: é o formato antigo (texto livre) e
+  // ele faz a tela de Agentes mostrar a lista de "nomes digitados que ainda não
+  // estão no cadastro" — que é a parte da tela que só aparece quando existe
+  // dado herdado.
+  const [diego, guilherme] = await Promise.all([
+    prisma.agente.create({
+      data: { nome: "Diego", email: "diego@seahub.local", ativo: true, criadoPor: "seed" },
+    }),
+    prisma.agente.create({
+      data: { nome: "Guilherme", email: "guilherme@seahub.local", ativo: true, criadoPor: "seed" },
+    }),
+  ]);
+
+  const clientesDoSeed = await prisma.customer.findMany({
+    where: { conexaId: { gte: BASE } },
+    select: { conexaId: true },
+    orderBy: { conexaId: "asc" },
+  });
+  const diasAtras = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+  if (clientesDoSeed.length >= 2) {
+    await prisma.contato.createMany({
+      data: [
+        {
+          customerConexaId: clientesDoSeed[0]!.conexaId,
+          contatoEm: diasAtras(3),
+          quem: diego.nome,
+          agenteId: diego.id,
+          regra: "extra",
+          resultado: "INTERESSADO",
+          nota: "pediu proposta de upgrade — retornar na semana que vem",
+          registradoPor: "seed",
+        },
+        {
+          customerConexaId: clientesDoSeed[1]!.conexaId,
+          contatoEm: diasAtras(40),
+          quem: guilherme.nome,
+          agenteId: guilherme.id,
+          regra: "4",
+          resultado: "RECUSOU",
+          nota: "não quer pacote agora",
+          registradoPor: "seed",
+        },
+        {
+          // Sem `agenteId`: é o registro no formato antigo, texto livre.
+          customerConexaId: clientesDoSeed[0]!.conexaId,
+          contatoEm: diasAtras(95),
+          quem: "Ana",
+          resultado: "SEM_RESPOSTA",
+          registradoPor: "seed",
+        },
+      ],
+    });
+  }
+
+  // Uma categoria já classificada à mão, para a UNIDADE existir como filtro na
+  // Carteira. A outra fica sem classificar de propósito — a tela precisa ter o
+  // que fazer.
+  await prisma.categoriaClassificacao.create({
+    data: {
+      serviceCategoryConexaId: BASE + 4,
+      segmento: "SERVICOS_DE_ESPACO",
+      unidade: "Sebrae",
+      nota: "classificada pelo seed, para demonstrar o filtro por unidade",
+      definidoPor: "seed",
+    },
+  });
+
   console.log(`[seed] ${perfis.length} clientes, ${bookingId - BASE} reservas, ${chargeId - BASE} cobranças`);
+  console.log("[seed] 2 agentes (Diego, Guilherme), 3 contatos e 1 categoria classificada");
   console.log("[seed] rode a consolidação em Motor → 'Consolidar inteligência' para as telas de receita");
 }
 

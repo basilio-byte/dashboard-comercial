@@ -1,21 +1,23 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { keyToUtcDate, todayKey, currentMonthKey, ultimosMesesFechados } from "@/lib/dates";
+import { keyToUtcDate, todayKey, currentMonthKey, nowInAppTz, ultimosMesesFechados } from "@/lib/dates";
 import { money } from "@/lib/money";
 import { estadoDoEspelho } from "@/lib/intel/completude";
+import { clientesComExcedente } from "@/lib/intel/horas";
+import type { ResultadoContato } from "@prisma/client";
 import {
-  ehSegmentoFiscal,
-  ehSegmentoPrivativa,
   litoralReservouSala,
   marcoAtingido,
   quedaMesAMes,
   quedaPercentual,
   usoAvulsoAlto,
 } from "./familias";
-import { PARAMS } from "./avaliar";
+import { carregarGatilhos, type GatilhoResolvido } from "./config";
+import { lerParams } from "./catalogo";
+import { carregarSegmentos } from "./segmentos";
 
 /**
- * A FILA DE TODOS OS SINAIS — não só o excedente de horas.
+ * A FILA DE TODOS OS SINAIS — o Radar inteiro, não só o excedente de horas.
  *
  * ⚠ O motivo desta função existir, medido em produção em 2026-08-27: numa
  * amostra de 10 clientes, **6 tinham sinal ativo** — regra 4 em dois, regra 8
@@ -28,9 +30,15 @@ import { PARAMS } from "./avaliar";
  * A pergunta do dono foi "por que os gatilhos não estão ligados?" — e a resposta
  * era que estavam, e o produto escondia. Um sinal que ninguém vê não é sinal.
  *
- * ⚠ Em LOTE, como a fila de excedente. Avaliar cliente a cliente daria N+1
- * sobre milhares de clientes e obrigaria a um corte — e corte foi exatamente o
- * defeito que fez a fila anterior enxergar 200 dos 5.244.
+ * ⚠ Em LOTE. Avaliar cliente a cliente daria N+1 sobre milhares de clientes e
+ * obrigaria a um corte — e corte foi exatamente o defeito que fez a fila
+ * anterior enxergar 200 dos 5.244.
+ *
+ * ⚠ **Desde 2026-09-16 o excedente entra aqui dentro.** Ele era uma fila
+ * separada, e o resultado era um Radar que mostrava um gatilho e escondia
+ * onze — exatamente o pedido do Diego de *"aumentar o número de oportunidades
+ * levando em consideração os gatilhos existentes"*. Não faltava gatilho:
+ * faltava a tela mostrar os que já existiam.
  */
 
 export interface ItemDaFila {
@@ -38,6 +46,7 @@ export interface ItemDaFila {
   nome: string | null;
   regra: string;
   nomeDaRegra: string;
+  familia: string;
   oferta: string;
   /** O número concreto que sustenta o sinal. */
   evidencia: string;
@@ -45,13 +54,39 @@ export interface ItemDaFila {
   peso: number;
 }
 
+export interface UltimoContato {
+  contatoEm: Date;
+  quem: string;
+  resultado: ResultadoContato;
+}
+
+/** Um cliente e TODOS os sinais dele — a linha que o Radar desenha. */
+export interface ClienteNaFila {
+  customerConexaId: number;
+  nome: string | null;
+  sinais: ItemDaFila[];
+  /** O peso do sinal mais forte — ordena a fila. */
+  peso: number;
+  ultimoContato: UltimoContato | null;
+  /** Receita no ano, para o filtro e para a coluna. */
+  receitaAno: number;
+  segmentos: string[];
+}
+
 export interface FilaDeSinais {
+  /** Um item por (cliente × regra). */
   itens: ItemDaFila[];
+  /** Os mesmos itens agrupados por cliente, do sinal mais forte para o mais fraco. */
+  clientes: ClienteNaFila[];
   analisados: number;
   /** Contagem por regra, para o placar. */
   porRegra: Record<string, number>;
   /** Regras que não puderam ser avaliadas, com o motivo. */
-  bloqueadas: Array<{ regra: string; motivo: string }>;
+  bloqueadas: Array<{ regra: string; nome: string; motivo: string }>;
+  /** Regras desligadas na configuração — diferente de bloqueadas. */
+  desligadas: Array<{ regra: string; nome: string }>;
+  /** Quantos gatilhos efetivamente rodaram. "Fila vazia" só é legível com isto. */
+  avaliados: number;
 }
 
 const fmtH = (v: { toFixed: (n: number) => string }) =>
@@ -60,20 +95,52 @@ const fmtH = (v: { toFixed: (n: number) => string }) =>
 export async function filaDeSinais(): Promise<FilaDeSinais> {
   const hoje = keyToUtcDate(todayKey());
   const mesAtual = currentMonthKey();
-  const espelho = await estadoDoEspelho();
+  const [espelho, gatilhos, segmentos] = await Promise.all([
+    estadoDoEspelho(),
+    carregarGatilhos(),
+    carregarSegmentos(),
+  ]);
 
-  const bloqueadas: Array<{ regra: string; motivo: string }> = [
-    // ⚠ Permissão, não conferência — ver a nota em `avaliar.ts`.
-    { regra: "2", motivo: "`/packages` responde 404: as horas do pacote não são legíveis" },
-    { regra: "9", motivo: "`/packages` responde 404: as horas do pacote não são legíveis" },
-  ];
-  if (!espelho.horasConfiavel) {
-    bloqueadas.push({ regra: "4", motivo: "espelho de reservas/contratos incompleto" });
-    bloqueadas.push({ regra: "5", motivo: "espelho de reservas incompleto" });
-    bloqueadas.push({ regra: "10", motivo: "espelho de reservas incompleto" });
-  }
+  const bloqueadas: FilaDeSinais["bloqueadas"] = [];
+  const desligadas: FilaDeSinais["desligadas"] = [];
 
-  // ── Carga em lote: cinco consultas para a base inteira ──────────────────
+  /**
+   * Um gatilho roda? Três portões, e cada "não" tem motivo DIFERENTE.
+   *
+   * ⚠ Distinguir os três é o ponto. "Bloqueado por permissão", "desligado por
+   * alguém" e "espelho incompleto" produzem a mesma fila vazia e pedem ações
+   * opostas: pedir liberação ao admin do Conexa, religar na tela, ou esperar a
+   * carga terminar. Um aviso genérico manda a pessoa trabalhar no lugar errado.
+   */
+  const roda = (g: GatilhoResolvido, exigeHoras = false): boolean => {
+    if (g.bloqueio) {
+      bloqueadas.push({ regra: g.codigo, nome: g.nome, motivo: g.bloqueio });
+      return false;
+    }
+    if (!g.ativo) {
+      desligadas.push({ regra: g.codigo, nome: g.nome });
+      return false;
+    }
+    if (exigeHoras && !espelho.horasConfiavel) {
+      bloqueadas.push({
+        regra: g.codigo,
+        nome: g.nome,
+        motivo: `espelho incompleto (${espelho.barramHoras.join(", ")})`,
+      });
+      return false;
+    }
+    return true;
+  };
+
+  // A família diz de qual dado o gatilho depende. Quem depende de reserva não
+  // roda com espelho de reservas incompleto — nenhuma regra dispara sobre dado
+  // incompleto (ADR-0011).
+  const DEPENDE_DE_HORAS = new Set(["USO_SEM_COTA", "PRIMEIRO_EVENTO", "EVENTO_EM_SEGMENTO", "EXCEDENTE"]);
+  const ligados = gatilhos.todos.filter((g) =>
+    roda(g, DEPENDE_DE_HORAS.has(g.familia)),
+  );
+
+  // ── Carga em lote: a base elegível inteira, em poucas consultas ──────────
   const contratos = await prisma.contract.findMany({
     where: {
       isActive: true,
@@ -105,7 +172,8 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
   const catPor = new Map(categorias.map((c) => [c.conexaId, c.name ?? ""]));
   const categoriaDo = (planConexaId: number | null) => {
     const p = planConexaId !== null ? planoPor.get(planConexaId) : undefined;
-    return p?.serviceCategoryConexaId != null ? catPor.get(p.serviceCategoryConexaId) ?? "" : "";
+    const id = p?.serviceCategoryConexaId ?? null;
+    return { id, nome: id != null ? catPor.get(id) ?? "" : "" };
   };
 
   const porCliente = new Map<number, typeof contratos>();
@@ -120,7 +188,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
   // Reservas: só as do mês corrente (regras 4 e 10) e a primeira de cada
   // cliente (regra 5). Duas consultas em vez de trazer 21 mil linhas.
   const inicioMes = keyToUtcDate(`${mesAtual}-01`);
-  const [reservasDoMes, primeiras, mensais] = await Promise.all([
+  const [reservasDoMes, primeiras, mensais, perfis, contatos] = await Promise.all([
     prisma.roomBooking.findMany({
       where: {
         customerConexaId: { in: alvos },
@@ -138,6 +206,18 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     prisma.customerMonthlyRevenue.findMany({
       where: { customerConexaId: { in: alvos }, mesKey: { in: ultimosMesesFechados(12) } },
       select: { customerConexaId: true, mesKey: true, receita: true },
+    }),
+    prisma.customerProfile.findMany({
+      where: { customerConexaId: { in: alvos } },
+      select: { customerConexaId: true, receitaAnoCorrente: true, segmentos: true },
+    }),
+    // ⚠ Sugestão do Diego: sem o último contato, a fila mostra o mesmo cliente
+    // todo dia, inclusive para quem já ligou ontem — e o vendedor aprende a
+    // ignorá-la. É assim que uma ferramenta de recomendação morre.
+    prisma.contato.findMany({
+      where: { customerConexaId: { in: alvos } },
+      orderBy: { contatoEm: "desc" },
+      select: { customerConexaId: true, contatoEm: true, quem: true, resultado: true },
     }),
   ]);
 
@@ -160,24 +240,34 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     l.push({ mesKey: m.mesKey, valor: money(m.receita.toString()) });
     seriePor.set(m.customerConexaId, l);
   }
+  const perfilPor = new Map(perfis.map((p) => [p.customerConexaId, p]));
+  const contatoPor = new Map<number, UltimoContato>();
+  for (const c of contatos) {
+    // Vêm ordenados por data desc: o primeiro de cada cliente é o mais recente.
+    if (!contatoPor.has(c.customerConexaId)) {
+      contatoPor.set(c.customerConexaId, {
+        contatoEm: c.contatoEm,
+        quem: c.quem,
+        resultado: c.resultado,
+      });
+    }
+  }
 
   // ── Avaliação, em memória ───────────────────────────────────────────────
   const itens: ItemDaFila[] = [];
-  const add = (
-    id: number,
-    regra: string,
-    nomeDaRegra: string,
-    oferta: string,
-    evidencia: string,
-    peso: number,
-  ) => itens.push({ customerConexaId: id, nome: nomePor.get(id) ?? null, regra, nomeDaRegra, oferta, evidencia, peso });
+  const add = (id: number, g: GatilhoResolvido, evidencia: string, peso: number) =>
+    itens.push({
+      customerConexaId: id,
+      nome: nomePor.get(id) ?? null,
+      regra: g.codigo,
+      nomeDaRegra: g.nome,
+      familia: g.familia,
+      oferta: g.oferta,
+      evidencia,
+      peso,
+    });
 
-  const MARCOS = [
-    { regra: "1", nome: "Fiscal completa 11 meses", meses: 11, oferta: "plano Bianual", privativa: false },
-    { regra: "6", nome: "Privativa completa 1 mês", meses: 1, oferta: "Registro de Marca", privativa: true },
-    { regra: "7", nome: "Privativa completa 2 meses", meses: 2, oferta: "SeaBox como benefício", privativa: true },
-    { regra: "8", nome: "Privativa completa 6 meses", meses: 6, oferta: "Panteão", privativa: true },
-  ];
+  const porFamilia = (f: string) => ligados.filter((g) => g.familia === f);
 
   for (const [id, lista] of porCliente) {
     const temCota = lista.some((c) => {
@@ -185,75 +275,154 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       return p?.horasInclusasMes != null || Array.isArray(c.hourPlanQuotaRaw);
     });
 
-    // MARCO_CONTRATO — 1, 6, 7, 8
-    for (const m of MARCOS) {
+    // ── MARCO_CONTRATO ────────────────────────────────────────────────────
+    for (const g of porFamilia("MARCO_CONTRATO")) {
+      const p = lerParams("MARCO_CONTRATO", g.params).params;
       const alvo = lista.find((c) => {
         if (!c.startDate) return false;
-        const cat = categoriaDo(c.planConexaId);
-        if (m.privativa ? !ehSegmentoPrivativa(cat) : !ehSegmentoFiscal(cat)) return false;
+        if (p.segmento !== "QUALQUER") {
+          const cat = categoriaDo(c.planConexaId);
+          if (segmentos.de(cat.id, cat.nome) !== p.segmento) return false;
+        }
         return marcoAtingido({
           inicio: c.startDate,
-          meses: m.meses,
+          meses: p.meses,
           hoje,
-          toleranciaDias: PARAMS.toleranciaMarcoDias,
+          toleranciaDias: p.toleranciaDias,
         });
       });
-      if (alvo) add(id, m.regra, m.nome, m.oferta, `contrato #${alvo.conexaId}`, 50);
+      if (alvo) add(id, g, `contrato #${alvo.conexaId}`, g.peso);
     }
 
-    // USO_SEM_COTA — 4
-    if (espelho.horasConfiavel) {
-      const horas = horasNoMesPor.get(id) ?? money(0);
-      if (usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: horas, limiarHoras: PARAMS.limiarHorasAvulso })) {
-        add(id, "4", "Avulso com uso alto", "pacote de horas", `${fmtH(horas)} no mês, sem cota`, Number(horas) * 5);
+    // ── USO_SEM_COTA ──────────────────────────────────────────────────────
+    const horas = horasNoMesPor.get(id) ?? money(0);
+    for (const g of porFamilia("USO_SEM_COTA")) {
+      const p = lerParams("USO_SEM_COTA", g.params).params;
+      if (usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: horas, limiarHoras: p.limiarHoras })) {
+        add(id, g, `${fmtH(horas)} no mês, sem cota`, g.peso + Number(horas) * 2);
       }
+    }
 
-      // PRIMEIRO_EVENTO — 5
+    // ── PRIMEIRO_EVENTO ───────────────────────────────────────────────────
+    for (const g of porFamilia("PRIMEIRO_EVENTO")) {
+      const p = lerParams("PRIMEIRO_EVENTO", g.params).params;
       const primeira = primeiraPor.get(id) ?? null;
       if (
         primeira &&
-        primeira >= keyToUtcDate(PARAMS.primeiraReservaDesde) &&
-        marcoAtingido({ inicio: primeira, meses: 0, hoje, toleranciaDias: PARAMS.toleranciaMarcoDias })
+        primeira >= keyToUtcDate(p.desde) &&
+        marcoAtingido({ inicio: primeira, meses: 0, hoje, toleranciaDias: p.toleranciaDias })
       ) {
-        add(id, "5", "Primeira reserva de sala", "Endereço Fiscal + SeaBox", "estreou agora", 60);
+        add(id, g, "estreou agora", g.peso);
       }
+    }
 
-      // EVENTO_EM_SEGMENTO — 10
+    // ── EVENTO_EM_SEGMENTO ────────────────────────────────────────────────
+    const nRes = reservasNoMesPor.get(id) ?? 0;
+    for (const g of porFamilia("EVENTO_EM_SEGMENTO")) {
+      const p = lerParams("EVENTO_EM_SEGMENTO", g.params).params;
+      // ⚠ O tier vem da COTA do plano, não do nome: Litoral sem cota, Batial
+      // 2h, Abissal 8h — medido na Fase 0.
       const litoral = lista.some((c) => {
-        if (!ehSegmentoFiscal(categoriaDo(c.planConexaId))) return false;
-        const p = c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined;
-        return p?.horasInclusasMes == null;
+        const cat = categoriaDo(c.planConexaId);
+        if (!segmentos.ehFiscal(cat.id, cat.nome)) return false;
+        const pl = c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined;
+        return pl?.horasInclusasMes == null;
       });
-      const nRes = reservasNoMesPor.get(id) ?? 0;
-      if (litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: nRes })) {
-        add(id, "10", "Litoral reserva sala", "Pacote de Horas ou Batial", `${nRes} reserva(s) no mês`, 40 + nRes);
+      if (
+        litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: nRes }) &&
+        nRes >= p.reservasMinimas
+      ) {
+        add(id, g, `${nRes} reserva(s) no mês`, g.peso + nRes);
       }
     }
 
-    // TENDENCIA — 3 e a métrica do §1
+    // ── TENDENCIA ─────────────────────────────────────────────────────────
     const serie = (seriePor.get(id) ?? []).sort((a, b) => a.mesKey.localeCompare(b.mesKey));
-    const q = quedaMesAMes({ serie, quedasSeguidas: PARAMS.quedasSeguidas });
-    if (q.disparou) {
-      add(id, "3", "Padrão de compra irregular", "novo pacote", `${q.quedas} quedas seguidas`, 30 + q.quedas * 5);
-    }
-    const ult = serie.at(-1);
-    const pen = serie.at(-2);
-    if (ult && pen) {
-      const pc = quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: PARAMS.limiarQuedaPct });
-      if (pc.disparou && pc.variacaoPct !== null) {
-        add(id, "métrica", "Queda de receita", "olhar antes que o cliente saia",
-          `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${ult.mesKey}`, Math.abs(pc.variacaoPct));
+    for (const g of porFamilia("TENDENCIA")) {
+      const p = lerParams("TENDENCIA", g.params).params;
+      if (p.modo === "quedas_seguidas") {
+        const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas });
+        if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5);
+        continue;
       }
+      const ult = serie.at(-1);
+      const pen = serie.at(-2);
+      if (!ult || !pen) continue;
+      const pc = quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: p.limiarPct });
+      if (pc.disparou && pc.variacaoPct !== null) {
+        add(id, g, `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${ult.mesKey}`, g.peso + Math.abs(pc.variacaoPct));
+      }
+    }
+  }
+
+  // ── EXCEDENTE — a fila que já existia, agora dentro desta ────────────────
+  //
+  // ⚠ Reaproveitada, e não reescrita: `clientesComExcedente` faz consolidação
+  // por ciclo de contrato, que é a parte mais delicada do projeto inteiro (cada
+  // contrato tem o SEU aniversário, e somar cotas de contratos com aniversários
+  // diferentes mistura janelas). Reimplementar aqui seria ter dois lugares para
+  // o mesmo bug de aritmética de ciclo.
+  for (const g of porFamilia("EXCEDENTE")) {
+    const p = lerParams("EXCEDENTE", g.params).params;
+    try {
+      const fila = await clientesComExcedente(nowInAppTz(), {
+        ciclosAnalisados: p.ciclosAnalisados,
+        ciclosComEstouro: p.ciclosComEstouro,
+      });
+      for (const i of fila.itens) {
+        if (!porCliente.has(i.customerConexaId)) continue; // mesmo gate
+        const s = i.horas.sinal;
+        if (!s) continue;
+        add(
+          i.customerConexaId,
+          g,
+          `${fmtH(s.horasExcedentes)} por fora em ${s.ciclosComEstouro}/${s.ciclosConclusivos} ciclos`,
+          g.peso + Number(s.horasExcedentes),
+        );
+      }
+    } catch (err) {
+      // ⚠ Vira bloqueio VISÍVEL, não lista vazia. A fila inteira não pode cair
+      // porque um gatilho não pôde ser avaliado — os outros onze têm resposta.
+      bloqueadas.push({
+        regra: g.codigo,
+        nome: g.nome,
+        motivo: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   const porRegra: Record<string, number> = {};
   for (const i of itens) porRegra[i.regra] = (porRegra[i.regra] ?? 0) + 1;
 
+  // ── Agrupamento por cliente ─────────────────────────────────────────────
+  const clientes = new Map<number, ClienteNaFila>();
+  for (const i of itens) {
+    const existente = clientes.get(i.customerConexaId);
+    if (existente) {
+      existente.sinais.push(i);
+      existente.peso = Math.max(existente.peso, i.peso);
+      continue;
+    }
+    const perfil = perfilPor.get(i.customerConexaId);
+    clientes.set(i.customerConexaId, {
+      customerConexaId: i.customerConexaId,
+      nome: i.nome,
+      sinais: [i],
+      peso: i.peso,
+      ultimoContato: contatoPor.get(i.customerConexaId) ?? null,
+      receitaAno: perfil ? Number(perfil.receitaAnoCorrente) : 0,
+      segmentos: perfil?.segmentos ?? [],
+    });
+  }
+  for (const c of clientes.values()) c.sinais.sort((a, b) => b.peso - a.peso);
+
   return {
     itens: itens.sort((a, b) => b.peso - a.peso),
+    clientes: [...clientes.values()].sort((a, b) => b.peso - a.peso),
     analisados: porCliente.size,
     porRegra,
     bloqueadas,
+    desligadas,
+    avaliados: ligados.length,
   };
 }

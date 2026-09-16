@@ -6,6 +6,7 @@ import { dataHoraLocal } from "@/lib/dates";
 import { PainelOperacao } from "./painel";
 import { Pulso } from "./pulso";
 import { Cabecalho, Faixa, Nota, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
+import { ComoFunciona } from "./como-funciona";
 import { cn } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +118,11 @@ export default async function Motor() {
             salas e espaços.
           </Faixa>
         ) : null}
+
+        {/* Resposta à pergunta do Diego em 2026-09-16: "Motor funciona como?".
+            Vem ANTES dos contadores porque contador só significa alguma coisa
+            depois de se saber o que a máquina faz com aquilo. */}
+        <ComoFunciona />
 
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <Contador rotulo="Clientes" n={clientes} />

@@ -4,6 +4,86 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-16 — MCP, configuração editável e o Radar mostrando o que já existia
+
+**O Radar mostrava um gatilho de doze.** `fila.ts` avaliava as 12 regras em lote
+e **nenhuma tela a importava**; o Radar consumia só a fila de excedente de horas.
+As outras onze eram avaliadas apenas abrindo cliente por cliente — e com milhares
+de clientes, um sinal que exige abrir a ficha é o mesmo que não existir.
+
+O pedido do Diego, *"Radar — aumentar o número de oportunidades levando em
+consideração os gatilhos existentes"*, é exatamente isso: **não faltava gatilho,
+faltava a tela mostrar os que já existiam**. `filaDeSinais()` agora inclui o
+excedente (reaproveitando `clientesComExcedente`, e não reescrevendo a
+consolidação por ciclo), agrupa por cliente e devolve `bloqueadas` e
+`desligadas` separados — porque "fila vazia" só é interpretável quando se sabe o
+que não foi avaliado, e de quem é a próxima ação.
+
+**Regra virou dado; família continua código.** Os limiares viviam em `PARAMS`,
+constante em `avaliar.ts`. Agora vivem na tabela `gatilhos`, editáveis na tela,
+com rastro de quem mudou. `avaliar.ts` varre `carregarGatilhos()` e despacha por
+família, em vez de percorrer arrays escritos nele — então um gatilho novo aparece
+na ficha do cliente e no Radar **sem tocar em código**.
+
+⚠ Os defaults do catálogo são **exatamente** os valores antigos: um banco sem
+linha nenhuma avalia igual ao de ontem. Não há migração de dado nem tela que
+precise ser aberta antes de o motor voltar a funcionar. E **não há escrita no
+caminho de leitura** — semear as 12 linhas na primeira consulta faria uma página
+de consulta escrever em produção.
+
+O que NÃO é editável, de propósito: a **família** de um gatilho nativo (trocá-la
+mudaria o significado de um código já gravado em `Contato.regra`) e o **bloqueio**
+por permissão da API (ligar a regra 2 não faz `/packages` responder).
+
+**Classificar categoria conserta uma falha silenciosa.** O casamento por trecho
+de nome — "privativ", "fiscal", "seabox" — para de encontrar contrato quando a
+Seahub renomeia uma categoria: a fila encolhe e não há erro em lugar nenhum. A
+classificação manual é **por id**, e id não muda quando o nome muda. A tela
+mostra as duas colunas lado a lado, porque é só assim que a renomeação aparece.
+Atende ao pedido do Diego ("Meu Depósito", "Serviços de Espaço - Sebrae") e traz
+a **unidade**, que virou filtro na Carteira.
+
+**Cadastro de agentes.** `Contato.quem` era texto livre e acumulava "Diego",
+"diego" e "DS" como três pessoas. A tela começa pelos nomes já digitados que não
+estão no cadastro — um formulário vazio convida a inventar. ⚠ A tela diz, em
+faixa de atenção, que **isto não é o vendedor responsável do Conexa**, que
+continua irresolvível.
+
+**Carteira com filtros combináveis**, como o Diego pediu, inclusive o exemplo
+literal dele (plano X + receita decrescente). ⚠ **"Horas disponíveis" não está
+lá, e a tela diz por quê**: o saldo do pacote vive atrás de um 404 de permissão.
+Aparece como lacuna declarada, com o motivo — é o que faz alguém pedir a
+liberação em vez de esperar para sempre.
+
+**Confiança dentro do cliente** (pergunta do Diego). A tela Confiança responde
+"o espelho está certo?"; o vendedor prestes a ligar pergunta "posso confiar
+nestes números aqui?". Não virou score: um número único seria inventado. É uma
+lista de afirmações verificáveis, cada uma com procedência.
+
+**"Motor funciona como?"** virou seção na tela Motor: os quatro elos, o porquê de
+cada um, e uma lista do que o motor **não** faz.
+
+**Servidor MCP** em `POST /api/mcp` — 31 ferramentas, 18 de leitura e 13 de
+escrita. Documentado em [mcp.md](mcp.md), com as decisões: protocolo à mão (o SDK
+quer `http.ServerResponse`, o App Router entrega `Request` da Web), `inputSchema`
+derivado do zod (escrever os dois à mão faz divergirem), erro de ferramenta como
+`result` com `isError` (erro de protocolo o cliente esconde do modelo), e
+`consulta_sql` em transação **READ ONLY** do Postgres — verificado: `nextval()`
+devolve `25006`.
+
+Sem `MCP_TOKEN` a rota responde **503**, não 200.
+
+⚠ **O Conexa lançou um MCP próprio**, com OAuth e permissão em cascata do
+usuário logado. Ele **não substitui o espelho** — OAuth é por pessoa, não tem
+selo de completude, escreve no ERP, e divide o mesmo rate limit sem que o nosso
+limitador o enxergue. Mas serve para uma coisa valiosa: **provar** se `/packages`
+é restrição do nosso token ou lacuna do produto. Ver [mcp.md](mcp.md).
+
+**Migration aditiva**, uma só: `agentes`, `gatilhos`, `categoria_classificacoes`,
+`mudancas_de_config`, e `contatos.agenteId` anulável. 152 testes (eram 120).
+
+---
+
 ## 2026-08-26 — No ar, com identidade própria; e o bloqueio do vendedor
 
 **Deploy feito.** O sistema está rodando no Easypanel, porta 7000, com agendador

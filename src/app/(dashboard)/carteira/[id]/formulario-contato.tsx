@@ -12,19 +12,15 @@ export const RESULTADO_ESTILO: Record<string, { rotulo: string; classe: string }
   FECHOU: { rotulo: "fechou", classe: "selo-bom" },
 };
 
-const REGRAS = [
-  { v: "", r: "— sem regra específica" },
-  { v: "extra", r: "extra · estoura a cota de horas" },
-  { v: "1", r: "regra 1 · Fiscal 11 meses" },
-  { v: "3", r: "regra 3 · padrão irregular" },
-  { v: "4", r: "regra 4 · avulso com uso alto" },
-  { v: "5", r: "regra 5 · primeira reserva" },
-  { v: "6", r: "regra 6 · privativa 1 mês" },
-  { v: "7", r: "regra 7 · privativa 2 meses" },
-  { v: "8", r: "regra 8 · privativa 6 meses" },
-  { v: "10", r: "regra 10 · Litoral reserva sala" },
-  { v: "métrica", r: "métrica · queda de receita" },
-];
+export interface OpcaoDeRegra {
+  v: string;
+  r: string;
+}
+
+export interface AgenteParaContato {
+  id: string;
+  nome: string;
+}
 
 /**
  * Registro de contato.
@@ -32,8 +28,21 @@ const REGRAS = [
  * ⚠ Fica fechado por padrão. Esta tela é para LER o cliente antes de ligar; o
  * formulário aberto o tempo todo empurraria o que importa para baixo da dobra.
  */
-export function FormularioContato({ customerConexaId }: { customerConexaId: number }) {
+export function FormularioContato({
+  customerConexaId,
+  agentes,
+  regras,
+}: {
+  customerConexaId: number;
+  /** Cadastro de agentes. Vazio = ninguém cadastrado, e o campo vira texto. */
+  agentes: AgenteParaContato[];
+  /** Os gatilhos VIGENTES, vindos da configuração — não uma lista escrita aqui. */
+  regras: OpcaoDeRegra[];
+}) {
   const [aberto, setAberto] = useState(false);
+  // "" = escolher do cadastro; "_outro" = digitar. Quando não há ninguém
+  // cadastrado, já começa em texto livre — um seletor vazio é um beco sem saída.
+  const [autor, setAutor] = useState(agentes.length ? "" : "_outro");
   const [estado, acao, pendente] = useActionState<EstadoContato, FormData>(registrarContato, {});
 
   // Fecha sozinho quando dá certo — a confirmação vira a linha nova na tabela.
@@ -74,13 +83,38 @@ export function FormularioContato({ customerConexaId }: { customerConexaId: numb
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Campo rotulo="Quem falou">
-          <input
-            name="quem"
-            required
-            maxLength={80}
-            placeholder="nome do vendedor"
-            className="campo"
-          />
+          {/* ⚠ O cadastro é a via preferida, mas nunca a única. Um seletor
+              fechado obrigaria a interromper o registro do contato para ir
+              cadastrar alguém — e o contato que dá trabalho registrar é o
+              contato que não é registrado. */}
+          {agentes.length ? (
+            <select
+              name={autor === "_outro" ? "_agenteIgnorado" : "agenteId"}
+              value={autor}
+              onChange={(e) => setAutor(e.target.value)}
+              className="campo"
+              required={autor !== "_outro"}
+            >
+              <option value="" disabled>
+                — escolha
+              </option>
+              {agentes.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nome}
+                </option>
+              ))}
+              <option value="_outro">outro (digitar)</option>
+            </select>
+          ) : null}
+          {autor === "_outro" ? (
+            <input
+              name="quem"
+              required
+              maxLength={80}
+              placeholder="nome de quem falou"
+              className={agentes.length ? "campo mt-1.5" : "campo"}
+            />
+          ) : null}
         </Campo>
 
         <Campo rotulo="Quando">
@@ -105,7 +139,8 @@ export function FormularioContato({ customerConexaId }: { customerConexaId: numb
 
         <Campo rotulo="Motivou por">
           <select name="regra" defaultValue="" className="campo">
-            {REGRAS.map((r) => (
+            <option value="">— sem regra específica</option>
+            {regras.map((r) => (
               <option key={r.v} value={r.v}>
                 {r.r}
               </option>

@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { ArrowUpRight, Inbox } from "lucide-react";
-import { nowInAppTz } from "@/lib/dates";
-import { clientesComExcedente } from "@/lib/intel/horas";
+import { ArrowUpRight, Ban, Inbox, PowerOff } from "lucide-react";
+import { filaDeSinais, type ClienteNaFila } from "@/lib/regras/fila";
+import { carregarGatilhos } from "@/lib/regras/config";
+import { formatBRL } from "@/lib/money";
 import { Cabecalho, Faixa, Nota, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 import { cn } from "@/lib/ui";
+import { FiltrosDoRadar } from "./filtros-radar";
 
 export const dynamic = "force-dynamic";
 
@@ -11,77 +13,116 @@ export const dynamic = "force-dynamic";
  * RADAR — a fila de quem procurar hoje.
  *
  * ⚠ Esta tela responde *"quem eu devo procurar, e por quê?"*, e **nada mais**.
+ * Ela já teve uma seção de receita do ano e top 5; eram métricas legítimas na
+ * tela errada, e foram para a Carteira, onde receita é atributo do cliente.
  *
- * Ela já teve uma seção de "Contexto" com receita do ano, top 5 e queda mensal.
- * Eram métricas legítimas — estão na especificação do Diego —, mas **na tela
- * errada**: ocupavam dois terços do Radar e competiam com a fila, que é o
- * produto. Foram para a Carteira, onde receita é atributo do cliente. O dono
- * apontou isso em 2026-08-27: *"a informação de receita não é tão relevante ao
- * propósito da ferramenta"*.
+ * ⚠ **Até 2026-09-16 ela mostrava UM gatilho de doze.** O Radar consumia só a
+ * fila de excedente de horas; as outras onze regras eram avaliadas apenas
+ * abrindo cliente por cliente, e `fila.ts` — que avalia todas em lote — estava
+ * escrita sem nenhum consumidor.
  *
- * O que sobra aqui é a fila, o que ela cobre, e o que ainda não dispara.
+ * O efeito medido disso: numa amostra de 10 clientes, **6 tinham sinal ativo**.
+ * Com milhares de clientes, um sinal que exige abrir a ficha é o mesmo que não
+ * existir. A pergunta do dono, *"por que os gatilhos não estão ligados?"*, tinha
+ * como resposta que estavam — e o produto escondia.
+ *
+ * O pedido do Diego, *"aumentar o número de oportunidades levando em
+ * consideração os gatilhos existentes"*, é exatamente isto: não faltava gatilho,
+ * faltava a tela mostrar os que já existiam.
  */
-export default async function Radar() {
-  const agora = nowInAppTz();
+export default async function Radar({
+  searchParams,
+}: {
+  searchParams: Promise<{ regra?: string; dias?: string; receita?: string; q?: string }>;
+}) {
+  const sp = await searchParams;
+  const regrasPedidas = (sp.regra ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const diasSemContato = sp.dias ? Number(sp.dias) : undefined;
+  const receitaMin = sp.receita ? Number(sp.receita) : undefined;
+  const busca = (sp.q ?? "").trim().toLowerCase();
 
-  // A fila LANÇA de propósito quando o espelho está incompleto, e o erro vira
-  // conteúdo. Devolver lista vazia seria indistinguível de "ninguém tem sinal"
-  // — a mentira mais cara que esta tela poderia contar.
-  let fila: Awaited<ReturnType<typeof clientesComExcedente>> | null = null;
-  let filaBloqueada: string | null = null;
-  try {
-    fila = await clientesComExcedente(agora);
-  } catch (err) {
-    filaBloqueada = err instanceof Error ? err.message : String(err);
+  const [fila, gatilhos] = await Promise.all([filaDeSinais(), carregarGatilhos()]);
+
+  let clientes = fila.clientes;
+  if (regrasPedidas.length) {
+    const set = new Set(regrasPedidas);
+    clientes = clientes
+      .map((c) => ({ ...c, sinais: c.sinais.filter((s) => set.has(s.regra)) }))
+      .filter((c) => c.sinais.length > 0);
+  }
+  if (diasSemContato !== undefined && !Number.isNaN(diasSemContato)) {
+    const corte = Date.now() - diasSemContato * 86_400_000;
+    clientes = clientes.filter(
+      (c) => !c.ultimoContato || c.ultimoContato.contatoEm.getTime() < corte,
+    );
+  }
+  if (receitaMin !== undefined && !Number.isNaN(receitaMin)) {
+    clientes = clientes.filter((c) => c.receitaAno >= receitaMin);
+  }
+  if (busca) {
+    clientes = clientes.filter((c) => (c.nome ?? "").toLowerCase().includes(busca));
   }
 
-  const horasFmt = (v: { toFixed: (n: number) => string }) =>
-    `${Number(v.toFixed(1))}h`.replace(".", ",");
-  const naFila = fila?.itens.length ?? 0;
-  const MOSTRAR = 25;
+  const MOSTRAR = 60;
+  const naFila = clientes.length;
+  const temFiltro = regrasPedidas.length > 0 || diasSemContato !== undefined || receitaMin !== undefined || !!busca;
+
+  // Só gatilhos que produziram alguém — filtrar por uma regra de fila vazia é
+  // um clique que não leva a lugar nenhum.
+  const opcoesDeRegra = gatilhos.todos
+    .filter((g) => (fila.porRegra[g.codigo] ?? 0) > 0)
+    .map((g) => ({ codigo: g.codigo, nome: g.nome, quantos: fila.porRegra[g.codigo] ?? 0 }));
 
   return (
     <>
       <Cabecalho
         titulo="Radar"
-        sub="Quem procurar hoje, e por quê."
+        sub="Quem procurar hoje, e por quê. Todos os gatilhos ligados, avaliados sobre a base elegível inteira."
         acao={
           naFila > 0 ? (
             <span className="selo selo-critico">
-              {naFila} {naFila === 1 ? "cliente na fila" : "clientes na fila"}
+              {naFila.toLocaleString("pt-BR")} {naFila === 1 ? "cliente na fila" : "clientes na fila"}
             </span>
           ) : null
         }
       />
 
-      <div className="space-y-9">
+      <div className="space-y-8">
+        <FiltrosDoRadar
+          regras={opcoesDeRegra}
+          selecionadas={regrasPedidas}
+          dias={sp.dias ?? ""}
+          receita={sp.receita ?? ""}
+          q={sp.q ?? ""}
+          totalDeSinais={fila.itens.length}
+        />
+
         <Secao
           titulo="Oportunidades"
-          sub="Clientes com sinal de venda adicional, do mais forte para o mais fraco."
+          sub="Do sinal mais forte para o mais fraco. Um cliente pode aparecer com mais de um motivo."
         >
-          {filaBloqueada ? (
-            <Faixa tom="atencao">
-              <strong>A fila ainda não pode ser calculada.</strong> {filaBloqueada}
-            </Faixa>
-          ) : !fila || fila.itens.length === 0 ? (
+          {clientes.length === 0 ? (
             <Vazio Icone={Inbox}>
-              Nenhum cliente com sinal no momento — sobre {fila?.analisados ?? 0} analisados.
-              {fila?.ambiguos ? (
+              {temFiltro ? (
                 <>
-                  {" "}
-                  <span className="text-[var(--atencao-tinta)]">
-                    {fila.ambiguos} ficaram de fora por atribuição ambígua
-                  </span>{" "}
-                  — têm mais de um contrato com cota, e a reserva não diz de qual balde a hora saiu.
+                  Nenhum cliente com esses filtros — de{" "}
+                  <strong>{fila.clientes.length.toLocaleString("pt-BR")}</strong> na fila.
                 </>
-              ) : null}
+              ) : (
+                <>
+                  Nenhum cliente com sinal, sobre{" "}
+                  {fila.analisados.toLocaleString("pt-BR")} analisados por{" "}
+                  {fila.avaliados} {fila.avaliados === 1 ? "gatilho" : "gatilhos"}.
+                </>
+              )}
             </Vazio>
           ) : (
             <Painel
               rodape={
                 naFila > MOSTRAR ? (
                   <>
-                    Mostrando os {MOSTRAR} sinais mais fortes de {naFila}.
+                    Mostrando os {MOSTRAR} sinais mais fortes de {naFila.toLocaleString("pt-BR")}.
+                    Use os filtros acima para cortar a fila por motivo.
                   </>
                 ) : null
               }
@@ -91,9 +132,8 @@ export default async function Radar() {
                   <thead>
                     <tr>
                       <th>Cliente</th>
-                      <th>Motivo</th>
-                      <th className="text-right">Horas pagas por fora</th>
-                      <th className="text-right">Ciclos</th>
+                      <th>Por quê</th>
+                      <th className="text-right">Receita no ano</th>
                       {/* Sugestão do Diego: sem isto a fila mostra o mesmo
                           cliente todo dia, inclusive para quem já ligou ontem. */}
                       <th>Último contato</th>
@@ -101,51 +141,8 @@ export default async function Radar() {
                     </tr>
                   </thead>
                   <tbody>
-                    {fila.itens.slice(0, MOSTRAR).map((i) => (
-                      <tr key={i.customerConexaId} className="linha-sinal group">
-                        <td>
-                          <Link
-                            href={`/carteira/${i.customerConexaId}`}
-                            className="font-medium hover:text-[var(--acento-tinta)] hover:underline"
-                          >
-                            {i.nome ?? `Cliente ${i.customerConexaId}`}
-                          </Link>
-                        </td>
-                        <td className="text-[var(--tinta-2)]">
-                          Estoura a cota de horas com recorrência — candidato a upgrade
-                        </td>
-                        <td className="num text-right font-semibold text-[var(--critico-tinta)]">
-                          {horasFmt(i.horas.sinal!.horasExcedentes)}
-                        </td>
-                        <td className="num text-right text-[var(--tinta-2)]">
-                          {i.horas.sinal!.ciclosComEstouro}/{i.horas.sinal!.ciclosConclusivos}
-                        </td>
-                        <td className="whitespace-nowrap">
-                          {i.ultimoContato ? (
-                            <span
-                              className={cn(
-                                "selo",
-                                i.ultimoContato.resultado === "RECUSOU" && "selo-critico",
-                                i.ultimoContato.resultado === "FECHOU" && "selo-bom",
-                              )}
-                              title={`${i.ultimoContato.quem} · ${i.ultimoContato.resultado.toLowerCase().replace("_", " ")}`}
-                            >
-                              {diasDesde(i.ultimoContato.contatoEm)} · {i.ultimoContato.quem}
-                            </span>
-                          ) : (
-                            <span className="text-[var(--tinta-3)]">nunca</span>
-                          )}
-                        </td>
-                        <td className="pr-3 text-right">
-                          <Link
-                            href={`/carteira/${i.customerConexaId}`}
-                            aria-label={`Abrir ${i.nome ?? i.customerConexaId}`}
-                            className="inline-flex text-[var(--tinta-3)] opacity-0 transition-opacity hover:text-[var(--acento-tinta)] group-hover:opacity-100"
-                          >
-                            <ArrowUpRight size={15} />
-                          </Link>
-                        </td>
-                      </tr>
+                    {clientes.slice(0, MOSTRAR).map((c) => (
+                      <Linha key={c.customerConexaId} cliente={c} />
                     ))}
                   </tbody>
                 </table>
@@ -154,55 +151,144 @@ export default async function Radar() {
           )}
 
           {/* A cobertura é parte do sinal: "ninguém na fila" só quer dizer algo
-              quando se sabe sobre quantos clientes a conta rodou. */}
-          {fila ? (
-            <Nota>
-              {fila.analisados.toLocaleString("pt-BR")} clientes elegíveis analisados — ativos, não
-              bloqueados e com contrato vigente ligado a um plano.
-              {fila.ambiguos > 0 ? (
-                <>
-                  {" "}
-                  <strong>{fila.ambiguos}</strong> ficaram de fora por atribuição ambígua: têm mais
-                  de um contrato com cota, e a reserva não diz de qual balde a hora saiu.
-                </>
-              ) : null}
-            </Nota>
-          ) : null}
+              quando se sabe sobre quantos clientes e por quantos gatilhos a
+              conta rodou. */}
+          <Nota>
+            {fila.analisados.toLocaleString("pt-BR")} clientes elegíveis analisados — ativos, não
+            bloqueados e com contrato vigente ligado a um plano — por{" "}
+            <strong>
+              {fila.avaliados} {fila.avaliados === 1 ? "gatilho" : "gatilhos"}
+            </strong>
+            , gerando {fila.itens.length.toLocaleString("pt-BR")} sinais em{" "}
+            {fila.clientes.length.toLocaleString("pt-BR")} clientes.
+          </Nota>
         </Secao>
 
-        {/* O detalhamento dos gatilhos vive em tela própria — repetir aqui
-            competiria com a fila, que é o produto desta tela.
-
-            ⚠ Esta faixa dizia "Só UM gatilho está ativo hoje", com o número
-            cravado, e errava duas vezes:
-
-            1. "ativo" é o vocabulário da FICHA do cliente, onde ele é plural —
-               `sinaisDoCliente()` marca ATIVO em oito regras diferentes, e a
-               ficha imprime "N gatilhos ativos". O que é único não é o gatilho
-               ativo: é o que alimenta ESTA fila.
-            2. o "um" era constante em JSX descrevendo estado de runtime. O
-               gatilho de excedente só fica ligado com `horasConfiavel`; sem ele
-               a resposta certa é zero — e a faixa aparecia, sem condicional
-               nenhum, logo abaixo de "a fila ainda não pode ser calculada",
-               afirmando que havia um gatilho ativo na mesma tela que dizia não
-               conseguir calcular nada.
-
-            Sem número agora. A tela Gatilhos deriva a contagem e é a dona dela;
-            duplicá-la aqui só cria um segundo lugar para ficar errado. */}
-        <Faixa tom="info">
-          Nem todo gatilho alimenta esta fila — os outros já são avaliados{" "}
-          <strong>cliente a cliente</strong>, na ficha. Veja em{" "}
-          <Link
-            href="/gatilhos"
-            className="font-medium text-[var(--acento-tinta)] underline underline-offset-2"
+        {(fila.bloqueadas.length > 0 || fila.desligadas.length > 0) && (
+          <Secao
+            titulo="O que não entrou nesta conta"
+            sub="Fila vazia só é interpretável quando se sabe o que não foi avaliado — e de quem é a próxima ação."
           >
-            Gatilhos
-          </Link>{" "}
-          o estado de cada um, e de quem é a próxima ação. Fila vazia só significa alguma coisa
-          quando se sabe o que está ligado.
+            <div className="grid gap-3 md:grid-cols-2">
+              {fila.bloqueadas.length > 0 ? (
+                <Painel titulo={<><Ban size={13} className="mr-1.5 inline" aria-hidden />Bloqueados</>}>
+                  <ul className="divide-y divide-[var(--linha)]">
+                    {fila.bloqueadas.map((b) => (
+                      <li key={b.regra} className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="num selo">{b.regra}</span>
+                          <span className="text-[13.5px] font-medium">{b.nome}</span>
+                        </div>
+                        <p className="mt-1 text-[12.5px] leading-relaxed text-[var(--tinta-3)]">
+                          {b.motivo}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                </Painel>
+              ) : null}
+
+              {fila.desligadas.length > 0 ? (
+                <Painel
+                  titulo={<><PowerOff size={13} className="mr-1.5 inline" aria-hidden />Desligados</>}
+                  rodape={
+                    <>
+                      Alguém desligou na tela{" "}
+                      <Link href="/gatilhos" className="font-medium text-[var(--acento-tinta)] underline underline-offset-2">
+                        Gatilhos
+                      </Link>{" "}
+                      — e religa lá. Não é conclusão sobre cliente nenhum.
+                    </>
+                  }
+                >
+                  <ul className="divide-y divide-[var(--linha)]">
+                    {fila.desligadas.map((d) => (
+                      <li key={d.regra} className="flex items-center gap-2 px-4 py-2.5">
+                        <span className="num selo">{d.regra}</span>
+                        <span className="text-[13.5px]">{d.nome}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Painel>
+              ) : null}
+            </div>
+          </Secao>
+        )}
+
+        <Faixa tom="info">
+          <strong>Nada aqui cria task em lugar nenhum.</strong> A camada de disparo não existe — o
+          Radar aponta, e a abordagem é sempre de uma pessoa. Registre o contato na ficha do
+          cliente para o mesmo nome não voltar amanhã.
         </Faixa>
       </div>
     </>
+  );
+}
+
+function Linha({ cliente: c }: { cliente: ClienteNaFila }) {
+  const principal = c.sinais[0]!;
+  return (
+    <tr className="linha-sinal group">
+      <td>
+        <Link
+          href={`/carteira/${c.customerConexaId}`}
+          className="font-medium hover:text-[var(--acento-tinta)] hover:underline"
+        >
+          {c.nome ?? `Cliente ${c.customerConexaId}`}
+        </Link>
+        {c.segmentos.length ? (
+          <div className="mt-0.5 text-[12px] text-[var(--tinta-3)]">{c.segmentos.join(", ")}</div>
+        ) : null}
+      </td>
+
+      <td className="max-w-lg">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="selo selo-critico">{principal.nomeDaRegra}</span>
+          <span className="text-[13px] text-[var(--tinta-2)]">{principal.evidencia}</span>
+          {c.sinais.length > 1 ? (
+            <span
+              className="selo"
+              title={c.sinais
+                .slice(1)
+                .map((s) => `${s.nomeDaRegra} — ${s.evidencia}`)
+                .join("\n")}
+            >
+              +{c.sinais.length - 1} {c.sinais.length === 2 ? "motivo" : "motivos"}
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-0.5 text-[12.5px] text-[var(--tinta-3)]">ofertar: {principal.oferta}</div>
+      </td>
+
+      <td className="num text-right">{formatBRL(c.receitaAno)}</td>
+
+      <td className="whitespace-nowrap">
+        {c.ultimoContato ? (
+          <span
+            className={cn(
+              "selo",
+              c.ultimoContato.resultado === "RECUSOU" && "selo-critico",
+              c.ultimoContato.resultado === "FECHOU" && "selo-bom",
+            )}
+            title={`${c.ultimoContato.quem} · ${c.ultimoContato.resultado.toLowerCase().replace("_", " ")}`}
+          >
+            {diasDesde(c.ultimoContato.contatoEm)} · {c.ultimoContato.quem}
+          </span>
+        ) : (
+          <span className="text-[var(--tinta-3)]">nunca</span>
+        )}
+      </td>
+
+      <td className="pr-3 text-right">
+        <Link
+          href={`/carteira/${c.customerConexaId}`}
+          aria-label={`Abrir ${c.nome ?? c.customerConexaId}`}
+          className="inline-flex text-[var(--tinta-3)] opacity-0 transition-opacity hover:text-[var(--acento-tinta)] group-hover:opacity-100"
+        >
+          <ArrowUpRight size={15} />
+        </Link>
+      </td>
+    </tr>
   );
 }
 

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "seahub-comercial": {
+      "type": "http",
+      "url": "${MCP_URL:-http://localhost:7000/api/mcp}",
+      "headers": {
+        "Authorization": "Bearer ${MCP_TOKEN}",
+        "x-mcp-cliente": "claude-code"
+      }
+    }
+  }
+}

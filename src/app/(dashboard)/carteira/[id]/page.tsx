@@ -12,6 +12,7 @@ import { horasDoCliente } from "@/lib/intel/horas";
 import { BlocoHoras } from "@/components/Horas";
 import { SinaisAutomaticos } from "./sinais";
 import { Contatos } from "./contatos";
+import { ConfiancaDoCliente } from "./confianca";
 import { Cartao, Faixa, Painel, Rolante, Secao, Vazio } from "@/components/Cartao";
 
 export const dynamic = "force-dynamic";
@@ -199,6 +200,15 @@ export default async function ClienteDetalhe({ params }: { params: Promise<{ id:
         <Secao titulo="Horas de sala por ciclo">
           <BlocoHoras dados={horas} confiavel={espelho.horasConfiavel} />
         </Secao>
+
+        {/* ⚠ Fica DEPOIS dos números, não antes. Quem abre a ficha veio ver o
+            cliente; a procedência é o que se consulta quando se vai repetir um
+            número — e no topo ela empurraria o cliente para baixo da dobra. */}
+        <ConfiancaDoCliente
+          customerConexaId={conexaId}
+          horas={horas}
+          calculadoEm={perfil?.calculadoEm}
+        />
 
         <Secao titulo="Contratos">
           {contratos.length === 0 ? (
