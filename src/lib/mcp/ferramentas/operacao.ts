@@ -12,6 +12,7 @@ import {
   requisicoesFeitas,
   respostas429,
   ultimoRateLimitObservado,
+  type Query,
 } from "@/lib/conexa/client";
 import { keyToUtcDate, todayKey } from "@/lib/dates";
 import { registrarMudanca } from "@/lib/regras/config";
@@ -53,6 +54,17 @@ export const ferramentasDeOperacao = [
         .max(4.5)
         .default(2)
         .describe("orçamento de tempo do backfill, em minutos"),
+      mesesParaTras: z
+        .number()
+        .int()
+        .min(0)
+        .max(24)
+        .optional()
+        .describe(
+          "só no modo incremental: quantos meses revarrer. Revarrer uma janela inteira também remove do " +
+            "espelho o que foi APAGADO no Conexa (confirmado por busca por id). Custa ~1–5 requisições por " +
+            "mês por entidade — restrinja `entidades`.",
+        ),
     }),
     somenteLeitura: false,
     mundoAberto: true,
@@ -66,7 +78,12 @@ export const ferramentasDeOperacao = [
         case "dimensions":
           return syncDimensoes();
         case "incremental":
-          return sincronizarIncremental({ entidades: a.entidades as Entidade[] | undefined });
+          return sincronizarIncremental({
+            entidades: a.entidades as Entidade[] | undefined,
+            ...(a.mesesParaTras !== undefined
+              ? { mesesParaTras: a.mesesParaTras, profundidade: "profunda" as const }
+              : {}),
+          });
         case "backfill":
           return cargaHistorica({
             entidades: a.entidades as Entidade[] | undefined,
@@ -198,7 +215,13 @@ export const ferramentasDeOperacao = [
     executar: async (a) => {
       if (!conexaConfigurado()) throw new Error("CONEXA_API_TOKEN não está configurado.");
       const recurso = a.recurso.replace(/^\/+/, "");
-      const dados = await conexaFetch<unknown>(recurso, a.query as Record<string, never>);
+      // ⚠ O query vai DENTRO de `{ query }`. Passado como segundo argumento cru,
+      // ele caía no lugar das OPÇÕES de `conexaFetch` e era descartado em
+      // silêncio: todo filtro era ignorado e a ferramenta devolvia as 20
+      // primeiras linhas da base como se fossem a resposta. O cast para
+      // `Record<string, never>` escondia o erro de tipo. Achado em 2026-09-18,
+      // ao testar `id[]` — `limit: 2` devolvia 20.
+      const dados = await conexaFetch<unknown>(recurso, { query: a.query as Query });
       return {
         recurso,
         dados,

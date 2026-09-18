@@ -670,6 +670,23 @@ export function mudancaDeContrato(p: {
 // SAUDE_FINANCEIRA — o FREIO das ofertas de venda
 // ---------------------------------------------------------------------------
 
+/**
+ * Status de cobrança EM ABERTO — emitida, não paga, não cancelada.
+ *
+ * ⚠ Não é só `unpaid`. Medido em 2026-09-18: 734 das 735 cobranças `denied` do
+ * último ano estão vencidas, e nenhuma tem pagamento — na prática é cobrança
+ * vencida e não paga. O freio olhava só `unpaid`, e o primeiro do Radar
+ * recebia oferta de upgrade com uma `denied` vencida havia 21 dias. O
+ * ADR-0010 já listava `denied`/`protested`/`juridical` como inadimplência dura;
+ * o código nunca tinha implementado. (`protested` e `juridical` não aparecem
+ * no último ano, mas a API os documenta.)
+ */
+export const STATUS_EM_ABERTO = ["unpaid", "denied", "protested", "juridical"] as const;
+const EM_ABERTO = new Set<string>(STATUS_EM_ABERTO);
+
+/** O que o freio e a tendência precisam ler: em aberto + renegociadas. */
+export const STATUS_PARA_O_FREIO = [...STATUS_EM_ABERTO, "negotiated"];
+
 export interface CobrancaParaFreio {
   status: string | null;
   dueDate: Date | null;
@@ -711,7 +728,7 @@ export function situacaoFinanceira(p: {
   let renegociou = false;
 
   for (const c of p.cobrancas) {
-    if (c.status === "unpaid" && c.dueDate) {
+    if (c.status && EM_ABERTO.has(c.status) && c.dueDate) {
       const atraso = Math.floor((p.hoje.getTime() - c.dueDate.getTime()) / dia);
       if (atraso >= p.diasDeAtrasoMin && atraso <= p.diasDeAtrasoMax) {
         vencidas++;

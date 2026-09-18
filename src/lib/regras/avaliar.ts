@@ -16,6 +16,7 @@ import {
   situacaoFinanceira,
   renegociouNoPeriodo,
   foraDaBaseElegivel,
+  STATUS_PARA_O_FREIO,
   temEvidenciaDeCota,
   usoAvulsoAlto,
   type CobrancaParaFreio,
@@ -191,7 +192,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     prisma.charge.findMany({
       where: {
         customerConexaId,
-        status: { in: ["unpaid", "negotiated"] },
+        status: { in: STATUS_PARA_O_FREIO },
         OR: [{ dueDate: { gte: umAnoAtras } }, { emissionDate: { gte: umAnoAtras } }],
       },
       select: { status: true, dueDate: true, emissionDate: true, amount: true, currentAmount: true },

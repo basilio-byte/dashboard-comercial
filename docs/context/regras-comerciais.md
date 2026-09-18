@@ -318,6 +318,11 @@ especificação e o motor não divergirem em silêncio.
   renegociou no período é AMBÍGUO. O mês em curso só desmente.
 - **Regra 3** — uma queda só conta a partir de 10%; oscilação de centavos
   depois de um pico de cobrança não é padrão.
+- **Freio — `denied` é dívida.** Cobrança `denied` é vencida e não paga (734 de
+  735 no último ano, nenhuma com pagamento); freia como `unpaid`, junto com
+  `protested` e `juridical` — a inadimplência dura que o ADR-0010 já previa.
+- **Gate da base elegível também na ficha**: para quem não tem contrato
+  vigente, só a mudança de contrato vale; o resto é consequência da saída.
 
 ### Regras 2 e 9 — a pergunta mudou de destino
 

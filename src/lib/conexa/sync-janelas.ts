@@ -1,11 +1,12 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { paginatePages, requisicoesFeitas } from "./client";
+import { byIds, paginatePages, requisicoesFeitas } from "./client";
 import { abrirRun, fecharRun, iniciarHeartbeat } from "./run";
 import { currentMonthKey } from "@/lib/dates";
 import {
   ENTIDADES,
   ORDEM_DE_CARGA,
+  decidirExpurgo,
   gerarJanelas,
   janelasIncrementais,
   limitesDaJanela,
@@ -124,6 +125,90 @@ export interface ResultadoJanela {
   janela: string;
   status: "CONCLUIDA" | "EM_ANDAMENTO" | "FALHOU";
   registros: number;
+  /** Ids removidos do espelho por terem sido APAGADOS no Conexa. */
+  removidos?: number[];
+  /** Por que a remoção não aconteceu, quando havia candidatos. */
+  expurgoSuspenso?: string;
+}
+
+/**
+ * O campo LOCAL pelo qual cada entidade corta a janela — o espelho do filtro da
+ * API em `ENTIDADES`.
+ *
+ * ⚠ `customers` fica de fora DE PROPÓSITO. Apagar um cliente do espelho
+ * cascateia para `contatos`, que é dado digitado pelo time e não existe em
+ * nenhum outro lugar. Cliente apagado no Conexa é raro; contato perdido é
+ * irrecuperável.
+ */
+const CAMPO_DA_JANELA: Partial<Record<Entidade, string>> = {
+  charges: "dueDate",
+  contracts: "startDate",
+  sales: "createdAtConexa",
+  bookings: "createdAtConexa",
+};
+
+/**
+ * Remove do espelho o que foi APAGADO no Conexa — ver `decidirExpurgo` para o
+ * porquê e para as travas. Chamado só depois de uma varredura COMPLETA de uma
+ * janela já carregada: `vistos` precisa ser a janela inteira, ou um registro
+ * apenas não-lido-ainda viraria candidato.
+ */
+async function expurgarRemovidos(
+  entidade: Entidade,
+  janela: string,
+  vistos: Set<number>,
+): Promise<{ removidos: number[]; suspenso: string | null }> {
+  const campo = CAMPO_DA_JANELA[entidade];
+  if (!campo) return { removidos: [], suspenso: null };
+  const def = ENTIDADES[entidade];
+  const { de, ate } = limitesDaJanela(janela, def.formato);
+  // Mesmo recorte da API: data pura é meia-noite UTC no espelho (`dataPura`);
+  // instante é comparado com o fuso da empresa, como o filtro foi enviado.
+  const intervalo =
+    def.formato === "data"
+      ? { gte: new Date(`${de}T00:00:00.000Z`), lte: new Date(`${ate}T00:00:00.000Z`) }
+      : { gte: new Date(de), lt: new Date(new Date(ate).getTime() + 1000) };
+
+  const delegate = delegateDe(entidade) as unknown as {
+    findMany: (a: unknown) => Promise<Array<{ conexaId: number }>>;
+    deleteMany: (a: unknown) => Promise<{ count: number }>;
+  };
+  const locais = await delegate.findMany({ where: { [campo]: intervalo }, select: { conexaId: true } });
+  const candidatos = locais.map((l) => l.conexaId).filter((id) => !vistos.has(id));
+  if (!candidatos.length) return { removidos: [], suspenso: null };
+
+  const controle = vistos.values().next().value as number | undefined;
+  if (controle === undefined) {
+    return {
+      removidos: [],
+      suspenso: "a varredura não devolveu nada nesta janela — sem registro-controle, nada removido",
+    };
+  }
+
+  const lotes: Array<{ pedidos: number[]; devolvidos: number[] }> = [];
+  const achados: Array<{ conexaId: number }> = [];
+  for (let i = 0; i < candidatos.length; i += 99) {
+    const pedidos = [...candidatos.slice(i, i + 99), controle];
+    const itens = await byIds<never>(def.recurso, pedidos);
+    const mapeados = itens.map(MAPEADORES[entidade]).filter((x): x is { conexaId: number } => x !== null);
+    // Registro devolvido que não se lê é registro cujo id não se sabe — e
+    // "não sei o id" não pode virar "então sumiu".
+    if (mapeados.length !== itens.length) {
+      return { removidos: [], suspenso: "a busca por id devolveu registro ilegível; nada removido" };
+    }
+    lotes.push({ pedidos, devolvidos: mapeados.map((m) => m.conexaId) });
+    achados.push(...mapeados);
+  }
+
+  const decisao = decidirExpurgo({ candidatos, totalNaJanela: locais.length, lotes, controle });
+  // O que existe mas não voltou na varredura (mudou de janela, ou a paginação
+  // pulou) é relido pelo id — inclusive quando a remoção foi suspensa.
+  const reler = new Set(decisao.reler);
+  await gravarLote(entidade, achados.filter((a) => reler.has(a.conexaId)));
+  if (decisao.remover.length) {
+    await delegate.deleteMany({ where: { conexaId: { in: decisao.remover } } });
+  }
+  return { removidos: decisao.remover, suspenso: decisao.suspenso };
 }
 
 /**
@@ -193,6 +278,10 @@ export async function sincronizarJanela(
    */
   let registros = offset === 0 ? 0 : registro.registros;
   let paginas = 0;
+  // Só uma revisita que começa do zero e vai até o fim vê a janela INTEIRA — é
+  // a única que pode dizer "este registro não existe mais".
+  const varreduraInteira = revisita && offset === 0;
+  const vistos = new Set<number>();
 
   try {
     for await (const pagina of paginatePages<never>(
@@ -204,6 +293,7 @@ export async function sincronizarJanela(
         .map(MAPEADORES[entidade])
         .filter((x): x is { conexaId: number } => x !== null);
       registros += await gravarLote(entidade, linhas);
+      for (const l of linhas) vistos.add(l.conexaId);
       offset = pagina.proximoOffset;
 
       // Progresso gravado DEPOIS da escrita: morrer entre as duas coisas
@@ -236,13 +326,40 @@ export async function sincronizarJanela(
       }
     }
 
+    // O que foi APAGADO no Conexa. Erro aqui não derruba a revisita: o dado lido
+    // continua bom, e o motivo fica na janela.
+    let expurgo: { removidos: number[]; suspenso: string | null } = { removidos: [], suspenso: null };
+    if (varreduraInteira) {
+      try {
+        expurgo = await expurgarRemovidos(entidade, janela, vistos);
+      } catch (err) {
+        expurgo = {
+          removidos: [],
+          suspenso: `busca por id falhou: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+
     await prisma.syncWindow.update({
       where: { entidade_janela: { entidade, janela } },
       // O offset zera: uma reexecução da janela varre do começo, que é o que
       // torna a janela re-verificável.
-      data: { status: "CONCLUIDA", concluidaEm: new Date(), offset: 0, registros },
+      data: {
+        status: "CONCLUIDA",
+        concluidaEm: new Date(),
+        offset: 0,
+        registros,
+        ...(expurgo.suspenso ? { erro: `expurgo suspenso: ${expurgo.suspenso}` } : {}),
+      },
     });
-    return { entidade, janela, status: "CONCLUIDA", registros };
+    return {
+      entidade,
+      janela,
+      status: "CONCLUIDA",
+      registros,
+      ...(expurgo.removidos.length ? { removidos: expurgo.removidos } : {}),
+      ...(expurgo.suspenso ? { expurgoSuspenso: expurgo.suspenso } : {}),
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // ⚠ Revisita que falha NÃO derruba a janela para FALHOU: o dado carregado
@@ -720,5 +837,14 @@ export async function progressoDaCarga(): Promise<
  * encheria a tabela sem responder melhor.
  */
 function resumoDeJanelas(detalhe: ResultadoJanela[]): string[] {
-  return detalhe.map((d) => `${d.entidade}:${d.janela}=${d.status}(${d.registros})`);
+  return detalhe.map((d) => {
+    let linha = `${d.entidade}:${d.janela}=${d.status}(${d.registros})`;
+    // ⚠ Remoção sem rastro seria dado sumindo sem ninguém saber por quê. Os ids
+    // ficam na execução — até 20, que é o que cabe numa linha legível.
+    if (d.removidos?.length) {
+      linha += ` removidos(${d.removidos.length}):${d.removidos.slice(0, 20).join(",")}`;
+    }
+    if (d.expurgoSuspenso) linha += ` expurgo-suspenso`;
+    return linha;
+  });
 }

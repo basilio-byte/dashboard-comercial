@@ -204,3 +204,11 @@ sincronização de `recurringSales` pegaria três. Uma chamada ao conector decid
 qual das duas evidências usar.
 
 Ver `docs/context/auditoria-api-2026-08-27.md` e `decisions.md`.
+
+## Correções de 2026-09-18 (noite)
+
+- **`conexa_get` descartava o `query`** desde que foi criada: todo filtro era
+  ignorado e a resposta eram as 20 primeiras linhas da base. Conclusão tirada
+  com ela antes desta data, com filtro, não vale.
+- **`sincronizar`** aceita `mesesParaTras` no modo incremental: revarre N meses
+  e, de quebra, remove do espelho o que foi apagado no Conexa (ADR-0015).

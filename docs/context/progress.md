@@ -4,6 +4,47 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, noite — o sistema contra o que ele se propõe
+
+Pedido do dono: *"verificar se a consistência do sistema está adequada ao que ele
+se propõe"*. Medido elo por elo da cadeia `dado → regra → sinal → vendedor age`.
+
+**Dado — a primeira reconciliação em produção.** A tabela `reconciliacoes`
+estava VAZIA: a conferência contra o Conexa nunca tinha rodado. Rodada para
+jun, jul e ago: **DIVERGE nos três**, e toda divergência era do mesmo tipo —
+"sobrando no espelho". 15 cobranças apagadas no Conexa (404 até no MCP oficial,
+com permissão total) seguiam abertas aqui: R$ 30.239,78 só em agosto, 7,8% do
+mês. A revisita relê o que muda; o que é apagado deixa de voltar, e o upsert
+nunca remove. Efeito: receita inflada e o freio acionado para 4 clientes
+elegíveis por dívida que não existe.
+
+Corrigido na carga (ADR-0015): a revisita que varre uma janela inteira confere
+por id o que não voltou, com um registro-controle em cada lote; o que o Conexa
+confirma não existir sai do espelho, o resto é relido. Teto de segurança, e
+`customers` fica de fora (apagar cascatearia os contatos digitados).
+
+**Regra — a inadimplência dura do ADR-0010 nunca foi implementada.** O freio
+olhava só `unpaid`. `denied` — 734 das 735 do último ano vencidas, nenhuma paga —
+passava. O **primeiro do Radar** recebia oferta de upgrade com uma `denied` de
+R$ 464 vencida havia 21 dias. Agora `denied`/`protested`/`juridical` freiam
+como `unpaid`, numa lista só (`STATUS_EM_ABERTO`).
+
+**A ferramenta `conexa_get` descartava todo filtro.** O query ia no lugar das
+opções de `conexaFetch`; um cast escondia o erro de tipo. Achado ao testar
+`id[]`: `limit: 2` devolvia 20.
+
+`sincronizar` ganhou `mesesParaTras`, para revarrer (e expurgar) meses antigos.
+
+**O que NÃO é código, e é o elo mais fraco:** em produção há 1 usuário (ADMIN),
+0 agentes, 0 contatos registrados e 1 login em 30 dias. O Radar produz sinais
+que ninguém do comercial lê, e a "supressão por já recusou" do ADR-0010 — que
+depende de contato registrado — nunca foi exercitada (e ainda não existe no
+código: o resultado RECUSOU só é exibido).
+
+231 testes (eram 223).
+
+---
+
 ## 2026-09-18, depois do deploy — a ferramenta nova achou o que eu não tinha achado
 
 Primeira rodada de `conferir_consistencia` em produção: **4 divergências**, e as

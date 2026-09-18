@@ -239,3 +239,88 @@ export function janelasIncrementais(
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Registros APAGADOS no Conexa
+// ---------------------------------------------------------------------------
+
+export interface DecisaoDeExpurgo {
+  /** Sumiram da janela E da busca por id: apagados no Conexa. */
+  remover: number[];
+  /** Sumiram da janela mas existem: mudaram de janela, ou a paginação pulou. Reler. */
+  reler: number[];
+  /** Por que nada foi removido, quando não foi. */
+  suspenso: string | null;
+}
+
+/**
+ * O que fazer com os registros locais que uma varredura COMPLETA da janela não
+ * devolveu.
+ *
+ * ⚠ Medido em 2026-09-18 pela reconciliação: **toda** divergência de jun, jul e
+ * ago era "sobrando no espelho" — 15 cobranças apagadas no Conexa (404 até no
+ * MCP oficial, com permissão total) e ainda abertas aqui, R$ 30 mil só em
+ * agosto. A revisita relê o que MUDOU, mas o que foi APAGADO simplesmente
+ * deixa de voltar, e o upsert nunca remove nada. Receita inflada, e freio
+ * acionado por dívida que não existe mais.
+ *
+ * ⚠ "Não voltou na varredura" NÃO prova remoção: a paginação da API não tem
+ * ordem estável, e ela repete — e portanto pula — registro entre páginas. A
+ * prova é a busca por id explícito. E a busca por id só vale se ela mesma for
+ * confiável, então vai junto um registro-controle que SABEMOS existir: se ele
+ * não volta, ou se volta algo que não foi pedido (filtro `id[]` ignorado),
+ * nada é removido.
+ *
+ * O teto é o último freio: se some muita coisa de uma vez, é mais provável a
+ * API estar estranha do que o financeiro ter apagado meio mês — então nada sai,
+ * e a janela registra o motivo para alguém conferir.
+ */
+export function decidirExpurgo(p: {
+  /** Ids locais da janela que a varredura completa não devolveu. */
+  candidatos: number[];
+  /** Linhas locais na janela, para o teto proporcional. */
+  totalNaJanela: number;
+  /**
+   * A busca por id, LOTE A LOTE (a API devolve até 100 por página). Cada lote
+   * leva o controle: um lote em que o filtro falhou não pode passar porque
+   * outro lote deu certo.
+   */
+  lotes: Array<{ pedidos: number[]; devolvidos: number[] }>;
+  /** O registro-controle: veio na varredura, então existe. */
+  controle: number;
+  teto?: { absoluto: number; fracao: number };
+}): DecisaoDeExpurgo {
+  const teto = p.teto ?? { absoluto: 20, fracao: 0.05 };
+  const devolvidos = new Set<number>();
+
+  for (const lote of p.lotes) {
+    const pedidos = new Set(lote.pedidos);
+    if (lote.devolvidos.some((id) => !pedidos.has(id))) {
+      return {
+        remover: [],
+        reler: [],
+        suspenso: "a busca por id devolveu registro que não foi pedido — o filtro `id[]` foi ignorado; nada removido",
+      };
+    }
+    if (!lote.devolvidos.includes(p.controle)) {
+      return {
+        remover: [],
+        reler: [],
+        suspenso: `o registro-controle #${p.controle} não voltou na busca por id — a busca não é confiável; nada removido`,
+      };
+    }
+    for (const id of lote.devolvidos) devolvidos.add(id);
+  }
+
+  const reler = p.candidatos.filter((id) => devolvidos.has(id));
+  const ausentes = p.candidatos.filter((id) => !devolvidos.has(id));
+  const limite = Math.max(teto.absoluto, Math.floor(teto.fracao * p.totalNaJanela));
+  if (ausentes.length > limite) {
+    return {
+      remover: [],
+      reler,
+      suspenso: `${ausentes.length} de ${p.totalNaJanela} registros sumiram do Conexa — acima do teto de segurança (${limite}); nada removido, conferir à mão`,
+    };
+  }
+  return { remover: ausentes, reler, suspenso: null };
+}

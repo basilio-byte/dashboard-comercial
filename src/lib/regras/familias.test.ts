@@ -543,6 +543,18 @@ describe("SAUDE_FINANCEIRA — o freio", () => {
     expect(situacaoFinanceira({ cobrancas: [c("unpaid", "2024-09-01")], ...params }).freiar).toBe(false);
   });
 
+  it("⚠ `denied` é cobrança vencida e não paga — freia como `unpaid`", () => {
+    // Tereza, 2026-09-18: 1ª do Radar, oferta de upgrade, com uma `denied` de
+    // R$ 464 vencida havia 21 dias. O freio só olhava `unpaid`.
+    const r = situacaoFinanceira({ cobrancas: [c("denied", "2026-08-28", 464)], ...params });
+    expect(r.freiar).toBe(true);
+    expect(r.vencidas).toBe(1);
+    expect(situacaoFinanceira({ cobrancas: [c("protested", "2026-08-01")], ...params }).freiar).toBe(true);
+    expect(situacaoFinanceira({ cobrancas: [c("juridical", "2026-08-01")], ...params }).freiar).toBe(true);
+    // paga ou cancelada continua sem freio
+    expect(situacaoFinanceira({ cobrancas: [c("paid", "2026-08-01")], ...params }).freiar).toBe(false);
+  });
+
   it("renegociou há 50 dias: freia", () => {
     const r = situacaoFinanceira({ cobrancas: [c("negotiated", "2026-07-29")], ...params });
     expect(r.freiar).toBe(true);

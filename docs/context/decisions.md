@@ -455,3 +455,32 @@ reintroduz o erro.
 - **Programa não é permanência.** O fim de um contrato de categoria PROGRAMA é
   conclusão (sinal de continuidade), não saída.
 - **Peso na fila pelo dinheiro em jogo**, não pela porcentagem.
+
+## ADR-0015 — O espelho remove o que foi apagado no Conexa, com prova por id
+
+**Contexto.** A primeira reconciliação em produção (2026-09-18) deu DIVERGE em
+jun, jul e ago, e toda divergência era "sobrando no espelho": cobranças
+apagadas no Conexa que seguiam abertas aqui — R$ 30 mil em agosto. O desenho
+por janelas relê o que MUDA (ver "deriva de estado"), mas o que é APAGADO
+deixa de voltar, e o upsert nunca remove nada. Nenhum teste falha e a tela fica
+calma: é a mesma classe de defeito da deriva, pelo outro lado.
+
+**Decisão.**
+1. Só uma **revisita completa** de uma janela já carregada (do offset 0 até o
+   fim) pode apontar candidatos: ids locais daquela janela que não voltaram.
+2. "Não voltou" **não é prova** — a paginação do Conexa não tem ordem estável e
+   pula registro. A prova é a busca por **id explícito** (`id[]`).
+3. A busca por id só vale se provar que funciona: cada lote leva um
+   **registro-controle** que sabidamente existe. Controle ausente, ou registro
+   devolvido que não foi pedido (filtro ignorado), suspende a remoção.
+4. **Teto**: sumiu mais que max(20, 5% da janela) ⇒ nada sai, a janela registra
+   o motivo. É mais provável a API estar estranha do que meio mês ter sido
+   apagado.
+5. O que existe mas não voltou é **relido** pelo id (mudou de janela, ou a
+   paginação pulou).
+6. **`customers` nunca é removido**: cascatearia para `contatos`, dado digitado
+   que não existe em outro lugar.
+7. Os ids removidos ficam no rastro da execução (`sync_runs.detail`).
+
+**Consequência.** A reconciliação volta a ser um verificador que pode dar BATE.
+A decisão pura (`decidirExpurgo`) tem teste para cada trava.

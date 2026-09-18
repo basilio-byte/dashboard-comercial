@@ -5,6 +5,7 @@ import {
   gerarJanelas,
   janelasIncrementais,
   limitesDaJanela,
+  decidirExpurgo,
 } from "./janelas";
 
 describe("limites da janela", () => {
@@ -203,5 +204,81 @@ describe("janelasIncrementais — profundidade rasa vs. profunda", () => {
     for (const [nome, def] of Object.entries(ENTIDADES)) {
       expect(def.mesesDeRevisita, nome).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("decidirExpurgo — o que sumiu do Conexa", () => {
+  // Agosto de 2026, medido: 13 cobranças apagadas no Conexa numa janela de 1.124.
+  const base = { totalNaJanela: 1124, controle: 30188 };
+
+  it("sumiu da varredura E da busca por id: remove", () => {
+    const r = decidirExpurgo({
+      ...base,
+      candidatos: [29036, 29416],
+      lotes: [{ pedidos: [29036, 29416, 30188], devolvidos: [30188] }],
+    });
+    expect(r).toEqual({ remover: [29036, 29416], reler: [], suspenso: null });
+  });
+
+  it("⚠ sumiu da varredura mas existe: RELÊ, não remove (mudou de janela ou a paginação pulou)", () => {
+    const r = decidirExpurgo({
+      ...base,
+      candidatos: [29036, 29417],
+      lotes: [{ pedidos: [29036, 29417, 30188], devolvidos: [29417, 30188] }],
+    });
+    expect(r.remover).toEqual([29036]);
+    expect(r.reler).toEqual([29417]);
+  });
+
+  it("⚠ o controle não voltou: a busca por id não é confiável, nada sai", () => {
+    const r = decidirExpurgo({ ...base, candidatos: [29036], lotes: [{ pedidos: [29036, 30188], devolvidos: [] }] });
+    expect(r.remover).toEqual([]);
+    expect(r.suspenso).toMatch(/controle/);
+  });
+
+  it("⚠ voltou registro que não foi pedido: o filtro id[] foi ignorado, nada sai", () => {
+    const r = decidirExpurgo({
+      ...base,
+      candidatos: [29036],
+      lotes: [{ pedidos: [29036, 30188], devolvidos: [30188, 1, 2, 3] }],
+    });
+    expect(r.remover).toEqual([]);
+    expect(r.suspenso).toMatch(/ignorado/);
+  });
+
+  it("⚠ sumiu demais de uma vez: teto de segurança, nada sai — mas relê o que existe", () => {
+    const candidatos = Array.from({ length: 80 }, (_, i) => i + 1);
+    const r = decidirExpurgo({
+      ...base,
+      candidatos,
+      lotes: [{ pedidos: [...candidatos, 30188], devolvidos: [1, 30188] }],
+    });
+    expect(r.remover).toEqual([]);
+    expect(r.reler).toEqual([1]);
+    expect(r.suspenso).toMatch(/teto/);
+  });
+
+  it("o teto é proporcional em janela grande e tem piso em janela pequena", () => {
+    const pedir = (n: number, total: number) => {
+      const candidatos = Array.from({ length: n }, (_, i) => i + 1);
+      return decidirExpurgo({ totalNaJanela: total, controle: 999, candidatos, lotes: [{ pedidos: [...candidatos, 999], devolvidos: [999] }] });
+    };
+    expect(pedir(20, 30).suspenso).toBeNull(); // piso de 20
+    expect(pedir(21, 30).suspenso).not.toBeNull();
+    expect(pedir(56, 1124).suspenso).toBeNull(); // 5% de 1.124
+    expect(pedir(57, 1124).suspenso).not.toBeNull();
+  });
+
+  it("⚠ um lote em que o filtro falhou não passa porque outro lote deu certo", () => {
+    const r = decidirExpurgo({
+      ...base,
+      candidatos: [1, 2],
+      lotes: [
+        { pedidos: [1, 30188], devolvidos: [30188] },
+        { pedidos: [2, 30188], devolvidos: [] }, // este lote veio vazio: não prova nada
+      ],
+    });
+    expect(r.remover).toEqual([]);
+    expect(r.suspenso).toMatch(/controle/);
   });
 });

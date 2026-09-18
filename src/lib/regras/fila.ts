@@ -12,6 +12,7 @@ import {
   quedaMesAMes,
   quedaSustentada,
   renegociouNoPeriodo,
+  STATUS_PARA_O_FREIO,
   ehHoraAvulsa,
   mudancaDeContrato,
   situacaoFinanceira,
@@ -332,7 +333,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     prisma.charge.findMany({
       where: {
         customerConexaId: { in: todos },
-        status: { in: ["unpaid", "negotiated"] },
+        status: { in: STATUS_PARA_O_FREIO },
         OR: [{ dueDate: { gte: umAnoAtras } }, { emissionDate: { gte: umAnoAtras } }],
       },
       select: {
