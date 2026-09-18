@@ -738,3 +738,50 @@ export function situacaoFinanceira(p: {
     motivo: partes.length ? partes.join("; ") : null,
   };
 }
+
+/**
+ * Houve cobrança renegociada desde `desde`? A régua de receita tira a
+ * renegociada (para não contar em dobro), e o que sobra parece queda — então
+ * uma queda de receita nesse período é AMBÍGUA, não afirmável.
+ *
+ * ⚠ Uma função para as duas leituras. A ficha e a fila tinham cada uma a sua
+ * cópia, e divergiam no que faziam com ela: a ficha marcava AMBÍGUO qualquer
+ * renegociação, mesmo sem queda nenhuma; a fila descartava o cliente.
+ */
+export function renegociouNoPeriodo(p: { cobrancas: CobrancaParaFreio[]; desde: Date }): boolean {
+  return p.cobrancas.some((c) => {
+    const ref = c.dueDate ?? c.emissionDate;
+    return c.status === "negotiated" && !!ref && ref >= p.desde;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Base elegível — o gate do Radar, para a ficha dizer o mesmo
+// ---------------------------------------------------------------------------
+
+export type ForaDaBase = "INATIVO_NO_CONEXA" | "BLOQUEADO_NO_CONEXA" | "SEM_CONTRATO_VIGENTE";
+
+/**
+ * O cliente está fora da base que o Radar avalia — para ESTA família?
+ *
+ * O Radar avalia quem está ativo, não bloqueado e com contrato vigente; de
+ * quem perdeu o contrato, avalia só a MUDANÇA DE CONTRATO. A ficha não tinha
+ * esse gate, e um ex-cliente aparecia com "receita caiu 92%" — que é a
+ * consequência da saída, não um sinal a mais. Medido em 2026-09-18 pelo
+ * `conferir_consistencia`: as 4 divergências entre Radar e ficha eram isso.
+ *
+ * O freio (SAUDE_FINANCEIRA) passa sempre: não é sinal, é o que suspende sinal,
+ * e saber que o ex-cliente está devendo continua sendo informação.
+ */
+export function foraDaBaseElegivel(p: {
+  ativoNoConexa: boolean;
+  bloqueadoNoConexa: boolean;
+  temContratoVigente: boolean;
+  familia: string;
+}): ForaDaBase | null {
+  if (p.familia === "SAUDE_FINANCEIRA") return null;
+  if (!p.ativoNoConexa) return "INATIVO_NO_CONEXA";
+  if (p.bloqueadoNoConexa) return "BLOQUEADO_NO_CONEXA";
+  if (!p.temContratoVigente && p.familia !== "MUDANCA_CONTRATO") return "SEM_CONTRATO_VIGENTE";
+  return null;
+}

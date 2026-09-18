@@ -14,10 +14,13 @@ import {
   ehHoraAvulsa,
   mudancaDeContrato,
   situacaoFinanceira,
+  renegociouNoPeriodo,
+  foraDaBaseElegivel,
   temEvidenciaDeCota,
   usoAvulsoAlto,
   type CobrancaParaFreio,
   type ContratoParaValor,
+  type ForaDaBase,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
 import { FAMILIAS_DE_VENDA, LACUNA_SALDO_PACOTE, lerParams } from "./catalogo";
@@ -130,6 +133,9 @@ interface ContextoDoCliente {
   receitaMesEmCurso: Money | null;
   /** O freio acionado, quando está. `null` = ofertas liberadas. */
   freio: { nome: string; motivo: string } | null;
+  /** Para o gate da base elegível — o mesmo que escolhe quem o Radar avalia. */
+  ativoNoConexa: boolean;
+  bloqueadoNoConexa: boolean;
 }
 
 export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]> {
@@ -146,7 +152,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
   const umAnoAtras = new Date(hoje);
   umAnoAtras.setUTCDate(umAnoAtras.getUTCDate() - 400);
 
-  const [contratos, horas, bookings, mensais, vendas, todosContratos, cobrancasBrutas] = await Promise.all([
+  const [contratos, horas, bookings, mensais, vendas, todosContratos, cobrancasBrutas, cadastro] = await Promise.all([
     prisma.contract.findMany({
       where: {
         customerConexaId,
@@ -189,6 +195,11 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
         OR: [{ dueDate: { gte: umAnoAtras } }, { emissionDate: { gte: umAnoAtras } }],
       },
       select: { status: true, dueDate: true, emissionDate: true, amount: true, currentAmount: true },
+    }),
+    // O gate da base elegível: a fila só avalia quem está ativo e não bloqueado.
+    prisma.customer.findUnique({
+      where: { conexaId: customerConexaId },
+      select: { isActive: true, isBlocked: true },
     }),
   ]);
 
@@ -367,6 +378,9 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     cobrancas,
     receitaMesEmCurso: emCurso ? money(emCurso.receita.toString()) : null,
     freio,
+    // Mesma condição da consulta da fila: `isActive: true, isBlocked: false`.
+    ativoNoConexa: cadastro?.isActive === true,
+    bloqueadoNoConexa: cadastro?.isBlocked !== false,
   };
 
   // A ordem é a do catálogo (`ordem`), já aplicada por `carregarGatilhos`.
@@ -422,8 +436,36 @@ function avaliarGatilho(g: GatilhoResolvido, ctx: ContextoDoCliente): Sinal {
       evidencia: undefined,
     };
   }
+
+  /**
+   * ⚠ O gate da base elegível — o MESMO que escolhe quem o Radar avalia. Sem
+   * ele, a ficha de um ex-cliente mostrava "receita caiu 92%" como sinal
+   * ATIVO, enquanto o Radar (certo) mostrava só "perdeu o contrato". Como o
+   * freio, vem depois da avaliação: a ficha diz "dispararia, e por que não".
+   */
+  const fora = foraDaBaseElegivel({
+    ativoNoConexa: ctx.ativoNoConexa,
+    bloqueadoNoConexa: ctx.bloqueadoNoConexa,
+    temContratoVigente: ctx.contratos.length > 0,
+    familia: g.familia,
+  });
+  if (fora && (sinal.estado === "ATIVO" || sinal.estado === "AMBIGUO")) {
+    return {
+      ...sinal,
+      estado: "NAO_APLICAVEL",
+      motivo: `Dispararia (${sinal.evidencia ?? sinal.motivo}), mas ${MOTIVO_FORA_DA_BASE[fora]}`,
+      evidencia: undefined,
+    };
+  }
   return sinal;
 }
+
+const MOTIVO_FORA_DA_BASE: Record<ForaDaBase, string> = {
+  INATIVO_NO_CONEXA: "o cadastro está inativo no Conexa — o Radar não avalia este cliente.",
+  BLOQUEADO_NO_CONEXA: "o cadastro está bloqueado no Conexa — o Radar não avalia este cliente.",
+  SEM_CONTRATO_VIGENTE:
+    "não há contrato vigente: para quem saiu, o sinal que vale é o de mudança de contrato (perdeu o contrato, programa concluído) — o resto é consequência da saída.",
+};
 
 function avaliarFamilia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   switch (g.familia) {
@@ -753,6 +795,7 @@ function eventoEmSegmento(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Bas
 
 function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   const p = lerParams("TENDENCIA", g.params).params;
+  const sinal = tendenciaDaReceita(g, ctx, base);
 
   /**
    * ⚠ Quem renegociou no período não tem "queda de receita": tem cobrança
@@ -760,20 +803,29 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
    * dobro), e o que sobra parece queda de 100% — medido em 2026-09-18: 4 dos 14
    * sinais eram isso, com a cobrança nova de setembro somando as antigas.
    * AMBIGUO, e não "não aplicável": o sistema não sabe, e diz que não sabe.
+   *
+   * ⚠ Mas só quando a queda DISPARARIA. Antes, a ficha marcava ambíguo toda
+   * renegociação, mesmo com a receita estável, e a fila descartava o cliente —
+   * as duas leituras divergiam. Agora as duas avaliam, e a renegociação só
+   * rebaixa a AMBÍGUO o que teria disparado.
    */
   const mesesOlhados = p.modo === "queda_sustentada" ? p.mesesAvaliados : p.modo === "quedas_seguidas" ? p.quedasSeguidas : 1;
-  const desdeReneg = inicioDaJanela(ctx.mesAtual, mesesOlhados + 1);
-  const renegociou = ctx.cobrancas.some((c) => {
-    const ref = c.dueDate ?? c.emissionDate;
-    return c.status === "negotiated" && !!ref && ref >= desdeReneg;
+  const renegociou = renegociouNoPeriodo({
+    cobrancas: ctx.cobrancas,
+    desde: inicioDaJanela(ctx.mesAtual, mesesOlhados + 1),
   });
-  if (renegociou) {
+  if (renegociou && (sinal.estado === "ATIVO" || sinal.estado === "AMBIGUO")) {
     return {
-      ...base,
+      ...sinal,
       estado: "AMBIGUO",
-      motivo: "Renegociou cobranças no período avaliado — a receita desses meses mostra a troca de cobrança, não o que o cliente contratou. Não dá para afirmar queda.",
+      motivo: `A receita caiu (${sinal.evidencia ?? "queda"}), mas o cliente renegociou cobranças no período — a receita desses meses mostra a troca de cobrança, não o que ele contratou. Não dá para afirmar queda.`,
     };
   }
+  return sinal;
+}
+
+function tendenciaDaReceita(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("TENDENCIA", g.params).params;
 
   if (p.modo === "queda_sustentada") {
     const r = quedaSustentada({
@@ -788,7 +840,7 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
       return { ...base, estado: "DADO_INDISPONIVEL", motivo: `Menos de ${p.mesesAvaliados + 3} meses fechados — não há base para comparar.` };
     }
     if (r.semBase === "BASE_ZERO") {
-      return { ...base, estado: "NAO_APLICAVEL", motivo: "Sem receita típica nos meses de base (mediana zero) — não existe base, e zero depois de zero não é queda." };
+      return { ...base, estado: "NAO_APLICAVEL", motivo: "Sem receita típica nos meses de base — não existe base, e zero depois de zero não é queda." };
     }
     if (r.semBase === "BASE_PEQUENA") {
       return {
@@ -802,7 +854,7 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
       return {
         ...base,
         estado: "ATIVO",
-        motivo: `${r.avaliados.join(" e ")} abaixo de ${100 - p.limiarPct}% do normal (mediana de ${baseTxt}); em média ${num(r.variacaoPct!)}%.`,
+        motivo: `${r.avaliados.join(" e ")} abaixo de ${100 - p.limiarPct}% do normal (base de ${baseTxt}/mês); em média ${num(r.variacaoPct!)}%.`,
         evidencia: `${num(r.variacaoPct!)}% por ${r.avaliados.length} meses`,
       };
     }
@@ -810,8 +862,8 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
       ...base,
       estado: "NAO_APLICAVEL",
       motivo: r.desmentidoPeloMesEmCurso
-        ? `${r.avaliados.join(" e ")} vieram abaixo do normal, mas o mês em curso já passou de ${100 - p.limiarPct}% da mediana (${baseTxt}) — era calendário de cobrança, não queda.`
-        : `Não ficou ${r.avaliados.length} meses seguidos abaixo de ${100 - p.limiarPct}% da mediana (${baseTxt}).`,
+        ? `${r.avaliados.join(" e ")} vieram abaixo do normal, mas o mês em curso já passou de ${100 - p.limiarPct}% da base (${baseTxt}/mês) — era calendário de cobrança, não queda.`
+        : `Não ficou ${r.avaliados.length} meses seguidos abaixo de ${100 - p.limiarPct}% da base (${baseTxt}/mês).`,
     };
   }
 

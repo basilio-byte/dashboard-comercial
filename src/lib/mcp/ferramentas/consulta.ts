@@ -7,7 +7,7 @@ import { horasDoCliente } from "@/lib/intel/horas";
 import { sinaisDoCliente } from "@/lib/regras/avaliar";
 import { filaDeSinais } from "@/lib/regras/fila";
 import { lerCategorias } from "@/lib/regras/segmentos";
-import { ultimosMesesFechados, ultimoMesFechado } from "@/lib/dates";
+import { keyToUtcDate, todayKey, ultimosMesesFechados, ultimoMesFechado } from "@/lib/dates";
 import { FAMILIAS } from "@/lib/regras/catalogo";
 import { SEGMENTOS } from "@/lib/regras/segmentos";
 
@@ -513,8 +513,14 @@ export const ferramentasDeConsulta = [
 
       // Amostra de elegíveis FORA da fila: nenhum sinal pode aparecer na ficha.
       const naFila = new Set(fila.clientes.map((c) => c.customerConexaId));
+      const hoje = keyToUtcDate(todayKey());
       const candidatos = await prisma.contract.findMany({
-        where: { isActive: true, customerConexaId: { not: null } },
+        // A MESMA definição de contrato vigente da fila — ativo e sem fim no passado.
+        where: {
+          isActive: true,
+          customerConexaId: { not: null },
+          OR: [{ endDate: null }, { endDate: { gte: hoje } }],
+        },
         select: { customerConexaId: true },
         distinct: ["customerConexaId"],
       });
@@ -550,6 +556,7 @@ export const ferramentasDeConsulta = [
         diferencasConhecidas: [
           "excedente AMBIGUO (mais de um contrato com cota) aparece na ficha e fica fora da fila — é 'não sei avaliar', não oportunidade",
           "oferta de venda suspensa pelo freio aparece como NAO_APLICAVEL na ficha e fora da fila — é a mesma decisão",
+          "cliente fora da base elegível (sem contrato vigente, inativo ou bloqueado): a ficha diz 'dispararia, mas…' como NAO_APLICAVEL — é o mesmo gate da fila",
         ],
       };
     },

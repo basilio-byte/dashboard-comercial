@@ -11,6 +11,7 @@ import {
   quedaContraBase,
   quedaMesAMes,
   quedaSustentada,
+  renegociouNoPeriodo,
   ehHoraAvulsa,
   mudancaDeContrato,
   situacaoFinanceira,
@@ -428,11 +429,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     return freioPor.get(id)!;
   };
 
+  /** Mesma função da ficha. */
   const renegociouDesde = (id: number, desde: Date) =>
-    (cobrancasPor.get(id) ?? []).some((c) => {
-      const ref = c.dueDate ?? c.emissionDate;
-      return c.status === "negotiated" && !!ref && ref >= desde;
-    });
+    renegociouNoPeriodo({ cobrancas: cobrancasPor.get(id) ?? [], desde });
 
   const paraValor = (c: {
     conexaId: number;
@@ -626,9 +625,13 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     for (const g of porFamilia("TENDENCIA")) {
       const p = lerParams("TENDENCIA", g.params).params;
       // Renegociou no período: a receita mostra a troca de cobrança, não o que
-      // o cliente contratou. Na ficha é AMBIGUO; na fila, simplesmente não entra.
+      // o cliente contratou — a queda que disparar é AMBÍGUA, como na ficha.
+      // (A fila descartava o cliente e a ficha marcava ambíguo mesmo sem queda:
+      // divergiam. Agora as duas avaliam e rebaixam só o que dispararia.)
       const olhados = p.modo === "queda_sustentada" ? p.mesesAvaliados : p.modo === "quedas_seguidas" ? p.quedasSeguidas : 1;
-      if (renegociouDesde(id, inicioDaJanela(mesAtual, olhados + 1))) continue;
+      const reneg = renegociouDesde(id, inicioDaJanela(mesAtual, olhados + 1));
+      const estadoDaQueda = reneg ? ("AMBIGUO" as const) : ("ATIVO" as const);
+      const sufixo = reneg ? " · renegociou no período" : "";
 
       if (p.modo === "queda_sustentada") {
         const r = quedaSustentada({
@@ -643,8 +646,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
           add(
             id,
             g,
-            `${r.variacaoPct.toFixed(1).replace(".", ",")}% por ${r.avaliados.length} meses (base ${fmtBRL(r.base)}/mês)`,
+            `${r.variacaoPct.toFixed(1).replace(".", ",")}% por ${r.avaliados.length} meses (base ${fmtBRL(r.base)}/mês)${sufixo}`,
             pesoPorValor(g.peso, Number(r.perdaPorMes ?? 0)),
+            estadoDaQueda,
           );
         }
         continue;
@@ -653,7 +657,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
         const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas, quedaMinimaPct: p.quedaMinimaPct });
         // AMBIGUO, como na ficha: avaliado sobre RECEITA, e falta definir se
         // "comprou 20h" é compra ou consumo.
-        if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5, "AMBIGUO");
+        if (q.disparou) add(id, g, `${q.quedas} quedas seguidas${sufixo}`, g.peso + q.quedas * 5, "AMBIGUO");
         continue;
       }
       // Contra a MEDIANA dos meses anteriores, não contra o mês anterior —
@@ -663,8 +667,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
         add(
           id,
           g,
-          `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${pc.mesAvaliado} contra a mediana`,
+          `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${pc.mesAvaliado} contra a mediana${sufixo}`,
           g.peso + Math.abs(pc.variacaoPct),
+          estadoDaQueda,
         );
       }
     }

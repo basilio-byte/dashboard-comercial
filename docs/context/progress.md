@@ -4,6 +4,31 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, depois do deploy — a ferramenta nova achou o que eu não tinha achado
+
+Primeira rodada de `conferir_consistencia` em produção: **4 divergências**, e as
+quatro com a mesma causa. A ficha não tinha o gate da base elegível. O Radar
+avalia quem está ativo, não bloqueado e com contrato vigente, e de quem perdeu o
+contrato avalia só a mudança de contrato; a ficha avaliava tudo para todo
+mundo. Skydocs, Allan Pablo e Caetano — os três saíram em agosto — tinham na
+ficha "receita caiu 92%" ao lado de "perdeu o contrato". A queda é a
+consequência da saída, não um sinal a mais.
+
+Agora o gate é uma função pura (`foraDaBaseElegivel`) e a ficha diz
+"dispararia, mas não há contrato vigente", como já dizia para o freio.
+
+Segunda divergência, latente: renegociação. A ficha marcava AMBÍGUO **todo**
+cliente que renegociou, mesmo com receita estável; a fila descartava o cliente.
+As duas agora avaliam a queda primeiro, e a renegociação só rebaixa para AMBÍGUO
+o que dispararia — com a mesma função (`renegociouNoPeriodo`).
+
+Configuração feita pelo MCP: categoria #22 → PROGRAMA. "Perdeu o contrato" caiu
+de 23 para 15; as 8 da turma do Hub foram para "programa concluído".
+
+Peso da fila arredondado (aparecia `96.3846`).
+
+---
+
 ## 2026-09-18, fim — Auditoria de consistência do sistema inteiro
 
 Pedido do dono: *"analise todo o sistema, veja se tudo está consistente e aplique

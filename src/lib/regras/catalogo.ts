@@ -228,7 +228,7 @@ export function rotuloDaRegra(codigo: string): string {
  * para um único cliente grande não achatar o resto da fila.
  */
 export function pesoPorValor(base: number, reaisPorMes: number): number {
-  return base + Math.min(60, Math.max(0, reaisPorMes) / 25);
+  return Math.round(base + Math.min(60, Math.max(0, reaisPorMes) / 25));
 }
 
 // ---------------------------------------------------------------------------

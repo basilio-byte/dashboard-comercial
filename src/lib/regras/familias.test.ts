@@ -15,6 +15,8 @@ import {
   ehHoraAvulsa,
   mudancaDeContrato,
   situacaoFinanceira,
+  renegociouNoPeriodo,
+  foraDaBaseElegivel,
   temEvidenciaDeCota,
   valorContratadoEm,
   valorMensalDoContrato,
@@ -639,5 +641,55 @@ describe("MUDANCA_CONTRATO — programa não é permanência (2026-09-18)", () =
       hoje, janelaDias: 45, limiarPct: 20,
     });
     expect(r.reduziu).toBe(false);
+  });
+});
+
+describe("renegociouNoPeriodo", () => {
+  const c = (status: string, venc: string | null, emissao: string | null = null) => ({
+    status, dueDate: venc ? d(venc) : null, emissionDate: emissao ? d(emissao) : null, valor: money(100),
+  });
+
+  it("renegociada dentro do período conta; fora, não", () => {
+    expect(renegociouNoPeriodo({ cobrancas: [c("negotiated", "2026-08-10")], desde: d("2026-07-01") })).toBe(true);
+    expect(renegociouNoPeriodo({ cobrancas: [c("negotiated", "2026-05-10")], desde: d("2026-07-01") })).toBe(false);
+  });
+
+  it("vencida sem renegociação não é renegociação", () => {
+    expect(renegociouNoPeriodo({ cobrancas: [c("unpaid", "2026-08-10")], desde: d("2026-07-01") })).toBe(false);
+  });
+
+  it("sem vencimento, usa a emissão", () => {
+    expect(renegociouNoPeriodo({ cobrancas: [c("negotiated", null, "2026-08-01")], desde: d("2026-07-01") })).toBe(true);
+  });
+});
+
+describe("foraDaBaseElegivel — o gate do Radar, na ficha", () => {
+  const base = { ativoNoConexa: true, bloqueadoNoConexa: false, temContratoVigente: true };
+
+  it("cliente elegível: nenhuma família fica de fora", () => {
+    for (const familia of ["TENDENCIA", "MARCO_CONTRATO", "MUDANCA_CONTRATO", "EXCEDENTE"]) {
+      expect(foraDaBaseElegivel({ ...base, familia })).toBeNull();
+    }
+  });
+
+  it("⚠ ex-cliente: a queda de receita é consequência da saída, não sinal a mais", () => {
+    // Skydocs, 2026-09-18: contrato encerrado em 18/08 e "receita caiu 92%" na
+    // ficha, enquanto o Radar mostrava só "perdeu o contrato".
+    const ex = { ...base, temContratoVigente: false };
+    expect(foraDaBaseElegivel({ ...ex, familia: "TENDENCIA" })).toBe("SEM_CONTRATO_VIGENTE");
+    expect(foraDaBaseElegivel({ ...ex, familia: "USO_SEM_COTA" })).toBe("SEM_CONTRATO_VIGENTE");
+    // ...mas a mudança de contrato é exatamente a pergunta sobre quem saiu.
+    expect(foraDaBaseElegivel({ ...ex, familia: "MUDANCA_CONTRATO" })).toBeNull();
+  });
+
+  it("inativo ou bloqueado no Conexa: fora de tudo, inclusive mudança de contrato", () => {
+    expect(foraDaBaseElegivel({ ...base, ativoNoConexa: false, familia: "MUDANCA_CONTRATO" })).toBe("INATIVO_NO_CONEXA");
+    expect(foraDaBaseElegivel({ ...base, bloqueadoNoConexa: true, familia: "TENDENCIA" })).toBe("BLOQUEADO_NO_CONEXA");
+  });
+
+  it("o freio passa sempre — não é sinal, e a dívida do ex-cliente segue sendo informação", () => {
+    expect(
+      foraDaBaseElegivel({ ativoNoConexa: false, bloqueadoNoConexa: true, temContratoVigente: false, familia: "SAUDE_FINANCEIRA" }),
+    ).toBeNull();
   });
 });
