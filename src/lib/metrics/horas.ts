@@ -144,11 +144,19 @@ export function abatidaDaCota(r: ReservaParaConsumo): boolean {
  * `deductedFromQuota` (37), **`paid` (48)**, `cancelled` (14), `notBilled` (1).
  * O status de faturada é `paid` — `billed` fica aceito por segurança, mas quem
  * aparece no dado real é `paid`.
+ *
+ * ⚠ Medido de novo em 2026-09-18, sobre jun–set inteiros: aparecem também
+ * `billed` (9 a 23 por mês) e **`partiallyPaid`** (5 em setembro). Este último
+ * não estava em balde nenhum — caía em "status desconhecido", que torna o ciclo
+ * INCONCLUSIVO. Um cliente que estourou a cota e pagou parte da conta deixava
+ * de confirmar o excedente, em silêncio. Pago em parte é faturado.
  */
+export const STATUS_FATURADA = new Set(["billed", "paid", "partiallyPaid"]);
+
 export function faturada(r: ReservaParaConsumo): boolean {
   if (r.isActive === false) return false;
   if (r.cancellationReason) return false;
-  return r.status === "billed" || r.status === "paid";
+  return STATUS_FATURADA.has(r.status ?? "");
 }
 
 /** Status DOCUMENTADOS de reserva, conforme a coleção Postman da API v2. */

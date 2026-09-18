@@ -1,15 +1,17 @@
 import "server-only";
 import { prisma } from "@/lib/db";
-import { keyToUtcDate, todayKey, currentMonthKey, nowInAppTz, ultimosMesesFechados } from "@/lib/dates";
+import { keyToUtcDate, todayKey, currentMonthKey, monthBounds, nowInAppTz, ultimosMesesFechados } from "@/lib/dates";
 import { money } from "@/lib/money";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { clientesComExcedente } from "@/lib/intel/horas";
+import { faturada } from "@/lib/metrics/horas";
 import type { ResultadoContato } from "@prisma/client";
 import {
   litoralReservouSala,
   marcoAtingido,
+  quedaContraBase,
   quedaMesAMes,
-  quedaPercentual,
+  temEvidenciaDeCota,
   usoAvulsoAlto,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
@@ -187,16 +189,42 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
 
   // Reservas: só as do mês corrente (regras 4 e 10) e a primeira de cada
   // cliente (regra 5). Duas consultas em vez de trazer 21 mil linhas.
-  const inicioMes = keyToUtcDate(`${mesAtual}-01`);
-  const [reservasDoMes, primeiras, mensais, perfis, contatos] = await Promise.all([
+  //
+  // ⚠ COM limite superior. A consulta usava só `dataLocal >= início do mês`, e
+  // todo agendamento FUTURO entrava como "horas no mês": medido em 2026-09-18,
+  // os "64h no mês" de um cliente eram 16h × setembro, outubro, novembro e
+  // dezembro — reservas recorrentes já marcadas. A ficha do cliente filtrava
+  // certo, então Radar e ficha discordavam sobre o mesmo cliente.
+  const { fromDate: inicioMes, toDateExclusive: fimMes } = monthBounds(mesAtual);
+
+  // Janela da evidência de cota: a maior pedida entre os gatilhos que a usam.
+  const mesesDeEvidencia = Math.max(
+    1,
+    ...ligados
+      .filter((g) => g.familia === "USO_SEM_COTA" || g.familia === "EVENTO_EM_SEGMENTO")
+      .map((g) => Number((g.params as { mesesDeEvidenciaDeCota?: number }).mesesDeEvidenciaDeCota ?? 3)),
+  );
+  const inicioEvidencia = inicioDaJanela(mesAtual, mesesDeEvidencia);
+  const [reservasDoMes, abatidas, primeiras, mensais, perfis, contatos] = await Promise.all([
     prisma.roomBooking.findMany({
       where: {
         customerConexaId: { in: alvos },
         isActive: true,
         cancellationReason: null,
-        dataLocal: { gte: inicioMes },
+        dataLocal: { gte: inicioMes, lt: fimMes },
       },
-      select: { customerConexaId: true, horas: true },
+      select: { customerConexaId: true, horas: true, status: true },
+    }),
+    // A evidência de posse de cota — as reservas que o Conexa abateu.
+    prisma.roomBooking.findMany({
+      where: {
+        customerConexaId: { in: alvos },
+        isActive: true,
+        cancellationReason: null,
+        status: "deductedFromQuota",
+        dataLocal: { gte: inicioEvidencia },
+      },
+      select: { customerConexaId: true, status: true, dataLocal: true },
     }),
     prisma.roomBooking.groupBy({
       by: ["customerConexaId"],
@@ -221,16 +249,30 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     }),
   ]);
 
-  const horasNoMesPor = new Map<number, ReturnType<typeof money>>();
+  // Só hora FATURADA como avulso conta para a regra 4 — é a mesma leitura da
+  // ficha (`avaliar.ts`), com a mesma função.
+  const horasAvulsasPor = new Map<number, ReturnType<typeof money>>();
   const reservasNoMesPor = new Map<number, number>();
   for (const b of reservasDoMes) {
     if (b.customerConexaId === null) continue;
-    horasNoMesPor.set(
-      b.customerConexaId,
-      (horasNoMesPor.get(b.customerConexaId) ?? money(0)).plus(money(b.horas?.toString() ?? 0)),
-    );
+    if (faturada({ status: b.status })) {
+      horasAvulsasPor.set(
+        b.customerConexaId,
+        (horasAvulsasPor.get(b.customerConexaId) ?? money(0)).plus(money(b.horas?.toString() ?? 0)),
+      );
+    }
     reservasNoMesPor.set(b.customerConexaId, (reservasNoMesPor.get(b.customerConexaId) ?? 0) + 1);
   }
+  const abatidasPor = new Map<number, typeof abatidas>();
+  for (const b of abatidas) {
+    if (b.customerConexaId === null) continue;
+    const l = abatidasPor.get(b.customerConexaId) ?? [];
+    l.push(b);
+    abatidasPor.set(b.customerConexaId, l);
+  }
+  /** Mesma função da ficha — é o que impede Radar e ficha de discordarem. */
+  const evidenciaDeCota = (id: number, meses: number) =>
+    temEvidenciaDeCota({ reservas: abatidasPor.get(id) ?? [], desde: inicioDaJanela(mesAtual, meses) });
   const primeiraPor = new Map(
     primeiras.filter((g) => g.customerConexaId !== null).map((g) => [g.customerConexaId!, g._min.dataLocal]),
   );
@@ -295,11 +337,12 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     }
 
     // ── USO_SEM_COTA ──────────────────────────────────────────────────────
-    const horas = horasNoMesPor.get(id) ?? money(0);
+    const horas = horasAvulsasPor.get(id) ?? money(0);
     for (const g of porFamilia("USO_SEM_COTA")) {
       const p = lerParams("USO_SEM_COTA", g.params).params;
-      if (usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: horas, limiarHoras: p.limiarHoras })) {
-        add(id, g, `${fmtH(horas)} no mês, sem cota`, g.peso + Number(horas) * 2);
+      const comCota = temCota || evidenciaDeCota(id, p.mesesDeEvidenciaDeCota);
+      if (usoAvulsoAlto({ temContratoComCota: comCota, horasNoMes: horas, limiarHoras: p.limiarHoras })) {
+        add(id, g, `${fmtH(horas)} avulsas faturadas no mês`, g.peso + Number(horas) * 2);
       }
     }
 
@@ -330,7 +373,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       });
       if (
         litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: nRes }) &&
-        nRes >= p.reservasMinimas
+        nRes >= p.reservasMinimas &&
+        // Quem já tem pacote não recebe oferta de pacote.
+        !evidenciaDeCota(id, p.mesesDeEvidenciaDeCota)
       ) {
         add(id, g, `${nRes} reserva(s) no mês`, g.peso + nRes);
       }
@@ -341,16 +386,20 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     for (const g of porFamilia("TENDENCIA")) {
       const p = lerParams("TENDENCIA", g.params).params;
       if (p.modo === "quedas_seguidas") {
-        const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas });
+        const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas, quedaMinimaPct: p.quedaMinimaPct });
         if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5);
         continue;
       }
-      const ult = serie.at(-1);
-      const pen = serie.at(-2);
-      if (!ult || !pen) continue;
-      const pc = quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: p.limiarPct });
+      // Contra a MEDIANA dos meses anteriores, não contra o mês anterior —
+      // um pico de cobrança não vira "queda" no mês seguinte.
+      const pc = quedaContraBase({ serie, mesesDeBase: p.mesesDeBase, limiarPct: p.limiarPct });
       if (pc.disparou && pc.variacaoPct !== null) {
-        add(id, g, `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${ult.mesKey}`, g.peso + Math.abs(pc.variacaoPct));
+        add(
+          id,
+          g,
+          `${pc.variacaoPct.toFixed(1).replace(".", ",")}% em ${pc.mesAvaliado} contra a mediana`,
+          g.peso + Math.abs(pc.variacaoPct),
+        );
       }
     }
   }
@@ -425,4 +474,10 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     desligadas,
     avaliados: ligados.length,
   };
+}
+
+/** 1º dia do mês `meses - 1` meses antes de `mesAtual`: a janela "últimos N meses". */
+function inicioDaJanela(mesAtual: string, meses: number): Date {
+  const [a, m] = mesAtual.split("-").map(Number);
+  return new Date(Date.UTC(a!, m! - 1 - (Math.max(1, meses) - 1), 1));
 }

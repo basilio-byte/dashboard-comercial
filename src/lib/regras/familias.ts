@@ -81,8 +81,19 @@ export interface PontoMensal {
 export function quedaMesAMes(p: {
   serie: PontoMensal[];
   quedasSeguidas?: number;
+  /**
+   * Quanto um mês precisa cair em relação ao anterior para CONTAR como queda.
+   *
+   * ⚠ Medido em produção em 2026-09-18: sem isso, R$ 86,01 → R$ 84,14 (−2%)
+   * contava como queda. Os quatro sinais da regra 3 na produção eram todos um
+   * pico de cobrança dupla seguido de uma oscilação de centavos — "2 quedas
+   * seguidas" em clientes com receita estável. Default 0 aqui preserva a função
+   * pura; quem define o valor de verdade é o parâmetro do gatilho.
+   */
+  quedaMinimaPct?: number;
 }): { disparou: boolean; quedas: number; de: string | null; ate: string | null } {
   const exigidas = p.quedasSeguidas ?? 2;
+  const minima = Math.abs(p.quedaMinimaPct ?? 0);
   const serie = [...p.serie].sort((a, b) => a.mesKey.localeCompare(b.mesKey));
   const nulo = { disparou: false, quedas: 0, de: null, ate: null };
   if (serie.length < exigidas + 1) return nulo;
@@ -95,6 +106,8 @@ export function quedaMesAMes(p: {
     const anterior = serie[i - 1]!;
     if (anterior.valor.lessThanOrEqualTo(0)) break; // sem base de comparação
     if (atual.valor.greaterThanOrEqualTo(anterior.valor)) break;
+    const quedaPct = Number(anterior.valor.minus(atual.valor).div(anterior.valor).times(100));
+    if (quedaPct < minima) break; // oscilação, não queda
     quedas++;
   }
 
@@ -124,6 +137,58 @@ export function quedaPercentual(p: {
   return { disparou: variacao <= -Math.abs(p.limiarPct), variacaoPct: variacao };
 }
 
+/** Mediana de valores monetários. Lista vazia devolve `null`, nunca zero. */
+export function mediana(valores: Money[]): Money | null {
+  if (!valores.length) return null;
+  const ord = [...valores].sort((a, b) => a.comparedTo(b));
+  const meio = Math.floor(ord.length / 2);
+  return ord.length % 2 ? ord[meio]! : ord[meio - 1]!.plus(ord[meio]!).div(2);
+}
+
+/**
+ * A métrica do §1 — "cair X%" — contra uma BASE, não contra o mês anterior.
+ *
+ * ⚠ Medido em produção em 2026-09-18: os 6 sinais de "queda de receita" eram
+ * todos artefato de cobrança. O regime é de EMISSÃO, e um mês em que o Conexa
+ * emite duas cobranças vira pico; a volta ao normal lia como "−50%" — quatro
+ * clientes com receita estável caíram "−50%" no mesmo agosto. O contrato ANUAL
+ * fazia pior: uma cobrança em julho, zero em agosto, "−100%".
+ *
+ * Com a mediana dos meses anteriores, um pico isolado não vira base: 148, 148,
+ * 297, 148 compara 148 com 148. E o anual se resolve sozinho — 0, 0, 900, 0 tem
+ * mediana zero, que é "sem base", não queda. Isso dispensou excluir os 328
+ * contratos anuais da análise, que era a outra saída e escondia um terço da base.
+ *
+ * Uma queda de verdade continua disparando: 1000, 1000, 1000, 500 dá −50%.
+ */
+export function quedaContraBase(p: {
+  /** Meses FECHADOS, em qualquer ordem. O último (mais recente) é o avaliado. */
+  serie: PontoMensal[];
+  /** Quantos meses antes do avaliado formam a base. */
+  mesesDeBase: number;
+  limiarPct: number;
+}): {
+  disparou: boolean;
+  variacaoPct: number | null;
+  base: Money | null;
+  mesAvaliado: string | null;
+  /** Por que não houve comparação, quando não houve. */
+  semBase: "SERIE_CURTA" | "BASE_ZERO" | null;
+} {
+  const serie = [...p.serie].sort((a, b) => a.mesKey.localeCompare(b.mesKey));
+  const n = Math.max(1, p.mesesDeBase);
+  if (serie.length < n + 1) {
+    return { disparou: false, variacaoPct: null, base: null, mesAvaliado: null, semBase: "SERIE_CURTA" };
+  }
+  const avaliado = serie[serie.length - 1]!;
+  const base = mediana(serie.slice(-(n + 1), -1).map((x) => x.valor))!;
+  if (base.lessThanOrEqualTo(0)) {
+    return { disparou: false, variacaoPct: null, base, mesAvaliado: avaliado.mesKey, semBase: "BASE_ZERO" };
+  }
+  const r = quedaPercentual({ atual: avaliado.valor, anterior: base, limiarPct: p.limiarPct });
+  return { ...r, base, mesAvaliado: avaliado.mesKey, semBase: null };
+}
+
 // ---------------------------------------------------------------------------
 // USO_SEM_COTA — regra 4
 // ---------------------------------------------------------------------------
@@ -149,6 +214,34 @@ export function usoAvulsoAlto(p: {
 }): boolean {
   if (p.temContratoComCota) return false;
   return p.horasNoMes.greaterThan(p.limiarHoras ?? 5);
+}
+
+/**
+ * O cliente TEM cota de horas, a julgar pelo que o próprio Conexa fez?
+ *
+ * ⚠ Medido em produção em 2026-09-18: as regras 4 e 10 ofertavam "pacote de
+ * horas" a UP Psicologia, Segantini, INDRA, Thiago e Isadora — e as reservas
+ * deles vinham com `status: "deductedFromQuota"`, o Conexa abatendo de uma cota.
+ * A cota é de PACOTE (`recurringSales.packageId`), que o espelho não sincroniza
+ * e cujo conteúdo a API não expõe. A regra olhava só contrato e plano, via "sem
+ * cota", e reofertava exatamente o que o cliente já tinha.
+ *
+ * A reserva abatida é a prova de posse que já está no dado — é o mesmo
+ * raciocínio do ADR-0005: o ERP já respondeu a pergunta. A janela é recente de
+ * propósito: abatimento de um ano atrás prova um pacote que pode ter acabado.
+ */
+export function temEvidenciaDeCota(p: {
+  reservas: Array<{ status?: string | null; dataLocal?: Date | null; isActive?: boolean; cancellationReason?: string | null }>;
+  desde: Date;
+}): boolean {
+  return p.reservas.some(
+    (r) =>
+      r.status === "deductedFromQuota" &&
+      r.isActive !== false &&
+      !r.cancellationReason &&
+      !!r.dataLocal &&
+      r.dataLocal >= p.desde,
+  );
 }
 
 // ---------------------------------------------------------------------------

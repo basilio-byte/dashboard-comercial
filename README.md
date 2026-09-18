@@ -163,7 +163,9 @@ Ponto de retomada detalhado: [progress.md](docs/context/progress.md) e
 O painel expõe um servidor MCP em `/api/mcp` — 31 ferramentas, 18 de leitura e 13 de escrita.
 
 ```bash
-claude mcp add --transport http seahub-comercial   https://SEU-DOMINIO/api/mcp   --header "Authorization: Bearer $MCP_TOKEN"
+claude mcp add --transport http --scope local seahub-comercial \
+  https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp \
+  --header "Authorization: Bearer $MCP_TOKEN"
 ```
 
 Sem `MCP_TOKEN` a rota responde **503**, não 200 — nasce fechada. `MCP_SOMENTE_LEITURA=on`

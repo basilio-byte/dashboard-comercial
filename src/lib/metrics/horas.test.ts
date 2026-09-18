@@ -211,11 +211,21 @@ describe("bugs que a auditoria adversarial encontrou", () => {
     expect(c.reservas).toBe(1);
   });
 
-  it("status desconhecido (partiallyPaid) não evapora", () => {
-    // Está no enum documentado da API e sumia de todos os baldes.
-    const c = consolidarCiclo(ciclo, [r({ status: "partiallyPaid", horas: 3 })], money(5));
+  it("status desconhecido não evapora — vira lacuna e o ciclo fica inconclusivo", () => {
+    // O exemplo original era `partiallyPaid`, que estava no enum documentado da
+    // API e sumia de todos os baldes. Desde 2026-09-18 ele é classificado como
+    // faturado (medido em produção); o mecanismo continua protegido aqui com um
+    // status que o código de fato não conhece.
+    const c = consolidarCiclo(ciclo, [r({ status: "statusQueOCodigoNaoConhece", horas: 3 })], money(5));
     expect(c.horasDesconhecidas.toFixed(2)).toBe("3.00");
     expect(c.conclusivo).toBe(false);
+  });
+
+  it("partiallyPaid também não evapora: é faturado, e o ciclo segue conclusivo", () => {
+    const c = consolidarCiclo(ciclo, [r({ status: "partiallyPaid", horas: 3 })], money(5));
+    expect(c.faturado.toFixed(2)).toBe("3.00");
+    expect(c.horasDesconhecidas.toFixed(2)).toBe("0.00");
+    expect(c.conclusivo).toBe(true);
   });
 
   it("cancelada é descarte legítimo — o ciclo continua conclusivo", () => {
@@ -227,7 +237,7 @@ describe("bugs que a auditoria adversarial encontrou", () => {
 
   it("ciclo não-conclusivo NÃO vota no sinal de excedente", () => {
     const bom = consolidarCiclo(ciclo, [r({ horas: 5 }), r({ status: "paid", horas: 2 })], money(5));
-    const furado = consolidarCiclo(ciclo, [r({ status: "partiallyPaid", horas: 9 })], money(5));
+    const furado = consolidarCiclo(ciclo, [r({ status: "statusQueOCodigoNaoConhece", horas: 9 })], money(5));
     const s = avaliarExcedente([bom, furado, furado], { minCiclosComEstouro: 2 });
     expect(s.ciclosConclusivos).toBe(1);
     expect(s.ciclosComEstouro).toBe(1);
@@ -355,5 +365,20 @@ describe("cota inconsistente — abatido acima do concedido", () => {
     );
     expect(c.cotaInconsistente).toBe(false);
     expect(c.estourou).toBe(false);
+  });
+});
+
+describe("faturada — status medidos em 2026-09-18", () => {
+  it("⚠ partiallyPaid é faturada: senão o ciclo vira inconclusivo em silêncio", () => {
+    // Não estava em balde nenhum: caía em "status desconhecido", e um único
+    // `partiallyPaid` no ciclo impedia de confirmar o excedente daquele cliente.
+    expect(faturada({ status: "partiallyPaid", horas: 2 })).toBe(true);
+  });
+
+  it("billed e paid continuam faturadas; notBilled e deductedFromQuota, não", () => {
+    expect(faturada({ status: "billed" })).toBe(true);
+    expect(faturada({ status: "paid" })).toBe(true);
+    expect(faturada({ status: "notBilled" })).toBe(false);
+    expect(faturada({ status: "deductedFromQuota" })).toBe(false);
   });
 });

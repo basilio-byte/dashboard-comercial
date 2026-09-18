@@ -1,15 +1,17 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import { keyToUtcDate, todayKey, currentMonthKey, ultimosMesesFechados } from "@/lib/dates";
-import { money, type Money } from "@/lib/money";
+import { formatBRL, money, type Money } from "@/lib/money";
 import { horasDoCliente, type HorasDoCliente } from "@/lib/intel/horas";
+import { faturada } from "@/lib/metrics/horas";
 import {
   litoralReservouSala,
   marcoAtingido,
   posseDoProduto,
   primeiraReserva,
+  quedaContraBase,
   quedaMesAMes,
-  quedaPercentual,
+  temEvidenciaDeCota,
   usoAvulsoAlto,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
@@ -94,8 +96,18 @@ interface ContextoDoCliente {
   planoSemCota(planConexaId: number | null): boolean;
   segmentos: MapaDeSegmentos;
   horas: HorasDoCliente;
+  /** Todas as horas reservadas no mês corrente, qualquer status. */
   horasNoMes: Money;
+  /**
+   * Só as horas FATURADAS como avulso no mês (billed, paid, partiallyPaid).
+   * É o que a regra 4 quer dizer com "compra hora avulsa": quem tem reserva
+   * `notBilled` não está pagando por hora, e a oferta "pacote sai mais barato
+   * que avulso" não se aplica a ele.
+   */
+  horasAvulsasNoMes: Money;
   reservasNoMes: number;
+  /** Houve reserva abatida da cota nos últimos N meses? Ver `temEvidenciaDeCota`. */
+  evidenciaDeCota(meses: number): boolean;
   primeiraReservaEm: Date | null;
   serie: Array<{ mesKey: string; valor: Money }>;
   /** O cliente já tem SeaBox, e por qual via. */
@@ -128,7 +140,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     }),
     prisma.roomBooking.findMany({
       where: { customerConexaId, isActive: true, cancellationReason: null },
-      select: { dataLocal: true, horas: true },
+      select: { dataLocal: true, horas: true, status: true },
       orderBy: { dataLocal: "asc" },
     }),
     prisma.customerMonthlyRevenue.findMany({
@@ -157,12 +169,16 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     return { id, nome: id != null ? nomeCat.get(id) ?? "" : "" };
   };
 
-  const horasNoMes = bookings
-    .filter((b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual)
-    .reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
-  const reservasNoMes = bookings.filter(
+  const doMes = bookings.filter(
     (b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual,
-  ).length;
+  );
+  const horasNoMes = doMes.reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
+  const horasAvulsasNoMes = doMes
+    .filter((b) => faturada({ status: b.status }))
+    .reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
+  const reservasNoMes = doMes.length;
+  const evidenciaDeCota = (meses: number) =>
+    temEvidenciaDeCota({ reservas: bookings, desde: inicioDaJanela(mesAtual, meses) });
   const primeiraReservaEm = bookings.find((b) => b.dataLocal)?.dataLocal ?? null;
 
   const fechados = new Set(ultimosMesesFechados(12));
@@ -242,7 +258,9 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     segmentos,
     horas,
     horasNoMes,
+    horasAvulsasNoMes,
     reservasNoMes,
+    evidenciaDeCota,
     primeiraReservaEm,
     serie,
     posseSeabox,
@@ -412,22 +430,35 @@ function marco(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
 
 function usoSemCota(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   const p = lerParams("USO_SEM_COTA", g.params).params;
-  const temCota = ctx.horas.contratos.some((c) => c.concedido !== null);
+  const cotaNoContrato = ctx.horas.contratos.some((c) => c.concedido !== null);
+  // ⚠ Pacote via venda recorrente não aparece em contrato nem plano, mas o
+  // Conexa abate as reservas dele. Sem isto, a regra reofertava pacote a quem
+  // já tinha pacote — medido em 2026-09-18.
+  const cotaPorEvidencia = ctx.evidenciaDeCota(p.mesesDeEvidenciaDeCota);
+  const temCota = cotaNoContrato || cotaPorEvidencia;
 
-  if (usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: ctx.horasNoMes, limiarHoras: p.limiarHoras })) {
+  if (
+    usoAvulsoAlto({ temContratoComCota: temCota, horasNoMes: ctx.horasAvulsasNoMes, limiarHoras: p.limiarHoras })
+  ) {
     return {
       ...base,
       estado: "ATIVO",
-      motivo: `Sem contrato com cota e ${h(ctx.horasNoMes)} usadas em ${ctx.mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
-      evidencia: `${h(ctx.horasNoMes)} no mês`,
+      motivo: `Sem cota e ${h(ctx.horasAvulsasNoMes)} faturadas como avulso em ${ctx.mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
+      evidencia: `${h(ctx.horasAvulsasNoMes)} avulsas no mês`,
     };
   }
+
+  const naoFaturadas = ctx.horasNoMes.minus(ctx.horasAvulsasNoMes);
   return {
     ...base,
     estado: "NAO_APLICAVEL",
-    motivo: temCota
+    motivo: cotaNoContrato
       ? "Tem contrato com cota — este gatilho é para quem só compra avulso."
-      : `${h(ctx.horasNoMes)} no mês, abaixo do limiar de ${p.limiarHoras}h.`,
+      : cotaPorEvidencia
+        ? `Tem reserva abatida da cota nos últimos ${p.mesesDeEvidenciaDeCota} meses — já tem pacote de horas, não é cliente de avulso.`
+        : naoFaturadas.greaterThan(0)
+          ? `${h(ctx.horasAvulsasNoMes)} faturadas como avulso em ${ctx.mesAtual}; outras ${h(naoFaturadas)} reservadas não são cobradas — não é compra avulsa.`
+          : `${h(ctx.horasAvulsasNoMes)} faturadas como avulso no mês, abaixo do limiar de ${p.limiarHoras}h.`,
   };
 }
 
@@ -482,6 +513,15 @@ function eventoEmSegmento(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Bas
     return ctx.planoSemCota(c.planConexaId);
   });
 
+  // Quem já tem pacote não recebe oferta de pacote — mesmo freio da regra 4.
+  if (litoral && ctx.evidenciaDeCota(p.mesesDeEvidenciaDeCota)) {
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: `Endereço Fiscal sem horas no plano, mas com reserva abatida da cota nos últimos ${p.mesesDeEvidenciaDeCota} meses — já tem pacote de horas.`,
+    };
+  }
+
   if (
     litoralReservouSala({ temPlanoFiscalSemCota: litoral, reservasNoPeriodo: ctx.reservasNoMes }) &&
     ctx.reservasNoMes >= p.reservasMinimas
@@ -506,7 +546,11 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
   const p = lerParams("TENDENCIA", g.params).params;
 
   if (p.modo === "quedas_seguidas") {
-    const queda = quedaMesAMes({ serie: ctx.serie, quedasSeguidas: p.quedasSeguidas });
+    const queda = quedaMesAMes({
+      serie: ctx.serie,
+      quedasSeguidas: p.quedasSeguidas,
+      quedaMinimaPct: p.quedaMinimaPct,
+    });
     if (queda.disparou) {
       return {
         ...base,
@@ -528,43 +572,47 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
     };
   }
 
-  const ult = ctx.serie.at(-1);
-  const pen = ctx.serie.at(-2);
-  if (!ult || !pen) {
+  const r = quedaContraBase({ serie: ctx.serie, mesesDeBase: p.mesesDeBase, limiarPct: p.limiarPct });
+  if (r.semBase === "SERIE_CURTA") {
     return {
       ...base,
       estado: "DADO_INDISPONIVEL",
-      motivo: "Sem dois meses fechados para comparar.",
+      motivo: `Menos de ${p.mesesDeBase + 1} meses fechados — não há base para comparar.`,
     };
   }
-
-  const pct = quedaPercentual({ atual: ult.valor, anterior: pen.valor, limiarPct: p.limiarPct });
-  if (pct.variacaoPct === null) {
+  if (r.semBase === "BASE_ZERO" || r.variacaoPct === null) {
     return {
       ...base,
       estado: "NAO_APLICAVEL",
-      motivo: "Mês anterior sem receita — não existe base de comparação. Não é queda de 100%.",
+      motivo: `Sem receita típica nos ${p.mesesDeBase} meses anteriores (mediana zero) — não existe base, e zero depois de zero não é queda. É o caso do contrato anual.`,
     };
   }
-  if (pct.disparou) {
+  const baseTxt = formatBRL(r.base!);
+  if (r.disparou) {
     return {
       ...base,
       estado: "ATIVO",
-      motivo: `Caiu ${num(Math.abs(pct.variacaoPct))}% de ${pen.mesKey} para ${ult.mesKey} (limiar de ${p.limiarPct}%).`,
-      evidencia: `${num(pct.variacaoPct)}%`,
+      motivo: `Caiu ${num(Math.abs(r.variacaoPct))}% em ${r.mesAvaliado} contra a mediana dos ${p.mesesDeBase} meses anteriores (${baseTxt}); limiar de ${p.limiarPct}%.`,
+      evidencia: `${num(r.variacaoPct)}%`,
     };
   }
   return {
     ...base,
     estado: "NAO_APLICAVEL",
-    // ⚠ Subir NÃO é "dentro do limiar de queda". A mensagem anterior dizia
+    // ⚠ Subir NÃO é "dentro do limiar de queda". A mensagem antiga dizia
     // "variação de 77.4%, dentro do limiar de 30%" para um cliente que CRESCEU
     // 77% — número certo, motivo mentiroso.
     motivo:
-      pct.variacaoPct > 0
-        ? `Subiu ${num(pct.variacaoPct)}% de ${pen.mesKey} para ${ult.mesKey} — não é queda.`
-        : `Caiu ${num(Math.abs(pct.variacaoPct))}%, dentro do limiar de ${p.limiarPct}%.`,
+      r.variacaoPct >= 0
+        ? `${r.mesAvaliado} ficou ${r.variacaoPct === 0 ? "igual à" : `${num(r.variacaoPct)}% acima da`} mediana dos ${p.mesesDeBase} meses anteriores (${baseTxt}) — não é queda.`
+        : `Caiu ${num(Math.abs(r.variacaoPct))}% contra a mediana (${baseTxt}), dentro do limiar de ${p.limiarPct}%.`,
   };
+}
+
+/** 1º dia do mês `meses - 1` meses antes de `mesAtual`: a janela "últimos N meses". */
+function inicioDaJanela(mesAtual: string, meses: number): Date {
+  const [a, m] = mesAtual.split("-").map(Number);
+  return new Date(Date.UTC(a!, m! - 1 - (Math.max(1, meses) - 1), 1));
 }
 
 function fmtDia(d: Date): string {

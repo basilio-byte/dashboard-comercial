@@ -27,6 +27,12 @@ import { z } from "zod";
  * silenciosa: um banco sem nenhuma linha de `gatilhos` avalia igual ao de
  * ontem. Configuração que muda o comportamento só por existir seria uma
  * armadilha para quem faz deploy.
+ *
+ * ⚠ **A exceção deliberada, de 2026-09-18:** `mesesDeBase`, `quedaMinimaPct` e
+ * `mesesDeEvidenciaDeCota` são CORREÇÕES, não preferências. Foram medidas
+ * contra a produção — a maioria dos sinais de tendência e das regras 4 e 10 era
+ * falsa — e o default deles muda o comportamento de propósito. Ver
+ * `docs/context/progress.md` na data.
  */
 export const paramsPorFamilia = {
   /** Regras 1, 6, 7 e 8 — "completou N meses de contrato". */
@@ -48,11 +54,29 @@ export const paramsPorFamilia = {
     quedasSeguidas: z.number().int().min(1).max(12).default(2),
     /** `queda_percentual`: o "X%" do documento. Sempre positivo — é magnitude. */
     limiarPct: z.number().min(1).max(100).default(30),
+    /**
+     * `queda_percentual`: quantos meses anteriores formam a BASE (a mediana
+     * deles). ⚠ Correção de 2026-09-18 — comparar com o mês anterior só
+     * transformava todo pico de cobrança em "queda" no mês seguinte.
+     */
+    mesesDeBase: z.number().int().min(1).max(12).default(3),
+    /**
+     * `quedas_seguidas`: queda mínima, em %, para um mês contar como queda.
+     * ⚠ Correção de 2026-09-18 — sem ela, −2% contava.
+     */
+    quedaMinimaPct: z.number().min(0).max(100).default(10),
   }),
 
   /** Regra 4 — ">5h no mês sem contrato com cota". */
   USO_SEM_COTA: z.object({
+    /** Horas FATURADAS como avulso no mês (billed, paid, partiallyPaid). */
     limiarHoras: z.number().min(0).max(500).default(5),
+    /**
+     * Uma reserva abatida da cota nestes últimos meses prova que o cliente tem
+     * cota — e quem tem cota não recebe oferta de pacote. Ver
+     * `temEvidenciaDeCota`, correção de 2026-09-18.
+     */
+    mesesDeEvidenciaDeCota: z.number().int().min(1).max(12).default(3),
   }),
 
   /** Regra 5 — primeira reserva de sala. */
@@ -68,6 +92,8 @@ export const paramsPorFamilia = {
   /** Regra 10 — Fiscal sem cota que reservou sala. */
   EVENTO_EM_SEGMENTO: z.object({
     reservasMinimas: z.number().int().min(1).max(100).default(1),
+    /** Mesmo freio da regra 4: quem já tem pacote não recebe oferta de pacote. */
+    mesesDeEvidenciaDeCota: z.number().int().min(1).max(12).default(3),
   }),
 
   /** O "extra" — estoura a cota com recorrência. */
@@ -183,7 +209,7 @@ export const NATIVOS: GatilhoNativo[] = [
     peso: 30,
     ordem: 3,
     bloqueio: null,
-    nota: 'avaliado sobre RECEITA · falta confirmar se "comprou 20h" é compra ou consumo — vêm de endpoints diferentes',
+    nota: 'avaliado sobre RECEITA · uma queda só conta a partir de 10% — oscilação de centavos depois de um pico de cobrança não é padrão · falta confirmar se "comprou 20h" é compra ou consumo',
   },
   {
     codigo: "4",
@@ -195,7 +221,7 @@ export const NATIVOS: GatilhoNativo[] = [
     peso: 55,
     ordem: 4,
     bloqueio: null,
-    nota: "a economia vs. avulso NÃO sai: a API não expõe preço por hora por produto. A task sai com a lacuna declarada, nunca com número estimado",
+    nota: "conta só hora FATURADA como avulso (billed, paid, partiallyPaid) · quem teve reserva abatida da cota nos últimos meses já tem pacote e não entra · a economia vs. avulso NÃO sai: a API não expõe preço por hora por produto",
   },
   {
     codigo: "5",
@@ -268,7 +294,7 @@ export const NATIVOS: GatilhoNativo[] = [
     peso: 40,
     ordem: 10,
     bloqueio: null,
-    nota: "o tier vem da cota do plano, não do nome — Litoral sem cota, Batial 2h, Abissal 8h, medido na Fase 0",
+    nota: "o tier vem da cota do plano, não do nome — Litoral sem cota, Batial 2h, Abissal 8h, medido na Fase 0 · quem já tem pacote (reserva abatida da cota) não entra",
   },
   {
     codigo: "métrica",
@@ -280,7 +306,7 @@ export const NATIVOS: GatilhoNativo[] = [
     peso: 35,
     ordem: 11,
     bloqueio: null,
-    nota: "⚠ o limiar de 30% é exemplo do documento, não decisão do cliente · mês anterior sem receita não é queda de 100%: é ausência de base",
+    nota: "compara com a MEDIANA dos 3 meses anteriores, não com o mês anterior: mês com duas cobranças ou cobrança anual não vira queda no mês seguinte · ⚠ o limiar de 30% é exemplo do documento, não decisão do cliente",
   },
 ];
 

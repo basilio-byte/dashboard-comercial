@@ -33,22 +33,55 @@ chamou, para o rastro de auditoria — não autoriza nada.
 
 ## Registrar
 
-**Claude Code (recomendado — HTTP direto):**
+Produção: **`https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp`**
+(domínio padrão do Easypanel, com certificado Let's Encrypt válido).
+
+> ⚠ O domínio próprio, `comercial.seahubcoworking.com.br`, servia em 2026-09-18
+> o certificado padrão do Easypanel (`CN=Easypanel`, autoassinado). O Claude
+> Code valida TLS e **recusa conectar** — use o domínio do Easypanel até o
+> certificado ser reemitido. Nunca contorne com `NODE_TLS_REJECT_UNAUTHORIZED=0`:
+> isso desliga a validação TLS do cliente inteiro e manda o token por conexão
+> interceptável.
+
+Cada pessoa registra com o **próprio** token, no escopo `local` — o token fica no
+`~/.claude.json` dela, fora do repositório:
 
 ```bash
-claude mcp add --transport http seahub-comercial \
-  https://SEU-DOMINIO/api/mcp \
-  --header "Authorization: Bearer $MCP_TOKEN"
+claude mcp add --transport http --scope local seahub-comercial \
+  https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp \
+  --header "Authorization: Bearer $MCP_TOKEN" --header "x-mcp-cliente: claude-code"
 ```
 
-O repositório já traz `.mcp.json` com `${MCP_URL}` e `${MCP_TOKEN}` — exporte as
-duas variáveis e o servidor aparece sozinho. **Nunca** escreva o token nesse
-arquivo: ele é versionado.
+**No Windows, com a extensão do VS Code**, o `claude` costuma não estar no PATH —
+o executável vem dentro da extensão. E o token é pedido sem eco, para não ir
+para o histórico do terminal:
+
+```powershell
+$claude = (Get-ChildItem "$env:USERPROFILE\.vscode\extensions\anthropic.claude-code-*\resources\native-binary\claude.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+$seguro = Read-Host "MCP_TOKEN" -AsSecureString
+$token  = (New-Object System.Management.Automation.PSCredential "mcp", $seguro).GetNetworkCredential().Password
+& $claude mcp add --transport http --scope local seahub-comercial https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp --header "Authorization: Bearer $token" --header "x-mcp-cliente: claude-code"
+Remove-Variable seguro, token
+& $claude mcp list
+```
+
+> ⚠ **Armadilha medida em 2026-09-18 — a letra do drive.** O escopo `local` é
+> gravado por caminho da pasta, com a caixa da letra do drive como veio. O
+> PowerShell reporta `C:/...`; a extensão abre o workspace como `c:/...`. São
+> duas chaves diferentes no `~/.claude.json`: o registro feito no terminal fica
+> invisível à extensão. Sintoma: `mcp list` no terminal mostra ✔ Connected e a
+> sessão da extensão não enxerga as ferramentas. Correção: a entrada precisa
+> existir sob as duas grafias, ou registrar com `--scope user`.
+
+> O repositório **não** traz `.mcp.json`. Ele existiu por dois dias, com
+> `${MCP_URL:-http://localhost:7000/api/mcp}`: quem não tinha `MCP_URL` definido
+> caía em `localhost`, recebia `ConnectionRefused` e não sabia por quê — e ele
+> ainda conflitava com o registro `local` de quem fazia do jeito certo.
 
 **Clientes que só falam stdio** (Claude Desktop e alguns IDEs) usam a ponte:
 
 ```bash
-MCP_URL=https://SEU-DOMINIO/api/mcp MCP_TOKEN=... node scripts/mcp-stdio.mjs
+MCP_URL=https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp MCP_TOKEN=... node scripts/mcp-stdio.mjs
 ```
 
 A ponte move bytes e nada mais. Toda decisão vive no servidor.
@@ -121,16 +154,29 @@ O conector oficial do Conexa (OAuth, permissão em cascata do usuário logado)
 - **Não tem selo de completude.** Todo o ADR-0011 se apoia em "nada derivado
   vira fato sem a fonte estar completa"; uma resposta de chat não prova que
   trouxe tudo.
-- **Ele escreve.** A postura deste projeto com o Conexa é somente leitura, em
-  todos os caminhos.
-- **Divide o mesmo rate limit** de 60 req/min, e o nosso limitador vive no
-  `globalThis` do nosso processo — ele não enxerga o consumo do conector. Uma
-  sessão exploratória pode matar de fome a revarredura diária.
+- **Ele escreve — e apaga.** O catálogo dele tem `delete_customer`,
+  `settle_charge`, `create_contract` e dezenas de outras. A postura deste
+  projeto com o Conexa é somente leitura, em todos os caminhos.
+- **Divide o mesmo teto de 60 req/min** — o próprio conector diz isso nas
+  descrições —, e o nosso limitador vive no `globalThis` do nosso processo: não
+  enxerga o consumo do conector.
 
-**Onde ele vale:** diagnóstico. Como a permissão dele é a do usuário logado,
-perguntar a um admin *"qual o saldo do pacote de horas do cliente X?"* decide se
-`/packages` é restrição do **nosso token** (e então o pedido ao admin do Conexa
-passa a ter prova) ou lacuna do produto. É o que destrava as regras 2 e 9 e o
-filtro "horas disponíveis" da Carteira.
+### ⚠ Medido em 2026-09-18: ele não alcança o pacote de horas
+
+A hipótese era que a permissão do usuário logado mostraria o que o nosso token
+não mostra. Com OAuth de permissão total, `get_recurring_sale` devolve
+`Pacote de horas ID: 34` e **nenhuma hora**, e o catálogo do conector **não tem
+ferramenta de pacote nem de vendedor**. A pergunta sobre o saldo muda de
+destino: não é "liberem `/packages` para o nosso token" (admin), é **"a API
+expõe as horas incluídas e o consumo de um pacote?"** (suporte do Conexa).
+
+### Onde ele vale
+
+**Conferir hipótese contra a fonte, com poucas chamadas de leitura.** Foi o que
+validou a correção das regras 4 e 10 em 2026-09-18: dos cinco clientes com
+reserva abatida da cota, três tinham pacote em venda recorrente e **dois não** —
+a cota deles vem de outra via. O status `deductedFromQuota` pega os cinco; uma
+sincronização de `recurringSales` pegaria três. Uma chamada ao conector decidiu
+qual das duas evidências usar.
 
 Ver `docs/context/auditoria-api-2026-08-27.md` e `decisions.md`.

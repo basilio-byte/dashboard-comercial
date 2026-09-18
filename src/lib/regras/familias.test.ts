@@ -6,8 +6,11 @@ import {
   litoralReservouSala,
   marcoAtingido,
   primeiraReserva,
+  mediana,
+  quedaContraBase,
   quedaMesAMes,
   quedaPercentual,
+  temEvidenciaDeCota,
   podeOfertar,
   posseDoProduto,
   usoAvulsoAlto,
@@ -233,5 +236,112 @@ describe("supressão — não ofertar o que o cliente já tem", () => {
     expect(podeOfertar("POR_COMPRA")).toBe(false);
     expect(podeOfertar("POR_CORTESIA")).toBe(false);
     expect(podeOfertar("DESCONHECIDO")).toBe(false);
+  });
+});
+
+/**
+ * ⚠ Os casos abaixo são SÉRIES REAIS da produção, medidas em 2026-09-18 — sem
+ * nome de cliente, só os valores. Cada uma era um sinal falso no Radar. Se um
+ * destes testes voltar a falhar, o sinal falso volta para a fila do vendedor.
+ */
+describe("TENDENCIA — casos reais de falso positivo (2026-09-18)", () => {
+  it("regra 3: oscilação de centavos depois de um pico NÃO é padrão irregular", () => {
+    // 86,85 · 170,16 (duas cobranças) · 86,01 · 84,14 — dava "2 quedas seguidas".
+    const s = serie(["2026-05", 86.85], ["2026-06", 170.16], ["2026-07", 86.01], ["2026-08", 84.14]);
+    expect(quedaMesAMes({ serie: s, quedasSeguidas: 2, quedaMinimaPct: 10 }).disparou).toBe(false);
+    // Sem a queda mínima, o defeito aparece — é o que o default 0 preserva.
+    expect(quedaMesAMes({ serie: s, quedasSeguidas: 2 }).disparou).toBe(true);
+  });
+
+  it("regra 3: o exemplo do documento continua disparando com queda mínima", () => {
+    const s = serie(["2026-06", 20], ["2026-07", 10], ["2026-08", 0]);
+    expect(quedaMesAMes({ serie: s, quedasSeguidas: 2, quedaMinimaPct: 10 }).disparou).toBe(true);
+  });
+
+  it("métrica: mês com DUAS cobranças não vira base — a volta ao normal não é queda", () => {
+    // 148,57 · 148,57 · 297,14 (2 cobranças) · 148,57 — dava "−50%".
+    const s = serie(["2026-05", 148.57], ["2026-06", 148.57], ["2026-07", 297.14], ["2026-08", 148.57]);
+    const r = quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 });
+    expect(r.disparou).toBe(false);
+    expect(r.variacaoPct).toBe(0);
+    // O defeito, reproduzido: contra o mês anterior, é −50%.
+    expect(
+      quedaPercentual({ atual: money(148.57), anterior: money(297.14), limiarPct: 30 }).disparou,
+    ).toBe(true);
+  });
+
+  it("métrica: cobrança ANUAL não é queda de 100% no mês seguinte", () => {
+    // 0 · 0 · 900,55 · 0 — contrato Yearly, dava "−100%".
+    const s = serie(["2026-05", 0], ["2026-06", 0], ["2026-07", 900.55], ["2026-08", 0]);
+    const r = quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 });
+    expect(r.disparou).toBe(false);
+    expect(r.semBase).toBe("BASE_ZERO");
+  });
+
+  it("métrica: cobrança avulsa isolada não é queda", () => {
+    // 163,84 · 163,84 · 570,09 · 163,84 — dava "−71%".
+    const s = serie(["2026-05", 163.84], ["2026-06", 163.84], ["2026-07", 570.09], ["2026-08", 163.84]);
+    expect(quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 }).disparou).toBe(false);
+  });
+
+  it("métrica: queda DE VERDADE continua disparando", () => {
+    const s = serie(["2026-05", 1000], ["2026-06", 1000], ["2026-07", 1000], ["2026-08", 500]);
+    const r = quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 });
+    expect(r.disparou).toBe(true);
+    expect(r.variacaoPct).toBe(-50);
+  });
+
+  it("métrica: cliente que zerou depois de meses estáveis dispara — é o churn", () => {
+    const s = serie(["2026-05", 400], ["2026-06", 410], ["2026-07", 395], ["2026-08", 0]);
+    expect(quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 }).disparou).toBe(true);
+  });
+
+  it("série curta demais não compara — e diz por quê", () => {
+    const s = serie(["2026-07", 100], ["2026-08", 10]);
+    expect(quedaContraBase({ serie: s, mesesDeBase: 3, limiarPct: 30 }).semBase).toBe("SERIE_CURTA");
+  });
+
+  it("mediana: par tira a média dos dois do meio; vazia é null, nunca zero", () => {
+    expect(mediana([money(1), money(3), money(2), money(10)])!.toNumber()).toBe(2.5);
+    expect(mediana([])).toBeNull();
+  });
+});
+
+describe("USO_SEM_COTA e EVENTO_EM_SEGMENTO — evidência de cota (2026-09-18)", () => {
+  const desde = d("2026-07-01");
+
+  it("reserva abatida da cota prova que o cliente TEM cota, mesmo sem plano com cota", () => {
+    // O caso real: pacote via recurringSales, invisível ao espelho, mas o
+    // Conexa abate as reservas dele.
+    expect(
+      temEvidenciaDeCota({ reservas: [{ status: "deductedFromQuota", dataLocal: d("2026-09-03") }], desde }),
+    ).toBe(true);
+  });
+
+  it("abatimento ANTIGO não prova cota de hoje — o pacote pode ter acabado", () => {
+    expect(
+      temEvidenciaDeCota({ reservas: [{ status: "deductedFromQuota", dataLocal: d("2025-11-03") }], desde }),
+    ).toBe(false);
+  });
+
+  it("reserva paga ou não faturada não é evidência de cota", () => {
+    expect(
+      temEvidenciaDeCota({
+        reservas: [
+          { status: "paid", dataLocal: d("2026-09-03") },
+          { status: "notBilled", dataLocal: d("2026-09-04") },
+        ],
+        desde,
+      }),
+    ).toBe(false);
+  });
+
+  it("reserva cancelada não conta", () => {
+    expect(
+      temEvidenciaDeCota({
+        reservas: [{ status: "deductedFromQuota", dataLocal: d("2026-09-03"), cancellationReason: "cliente desistiu" }],
+        desde,
+      }),
+    ).toBe(false);
   });
 });

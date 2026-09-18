@@ -4,6 +4,71 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18 — A primeira leitura da produção pelo MCP achou a fila cheia de sinais falsos
+
+O MCP foi ligado à produção e a primeira pergunta foi o tamanho do Radar novo.
+Eu tinha alertado para "milhares" de linhas; a medição deu **37 clientes e 47
+sinais sobre 1.011 elegíveis** — a amostra de agosto (6 de 10 com sinal) não
+representava a base elegível.
+
+O tamanho estava bom. O conteúdo não. Conferindo linha a linha contra o espelho,
+três defeitos de regra, nenhum de limiar:
+
+**1. Tendência: os 10 sinais (métrica + regra 3) eram artefato de cobrança.**
+O regime é de emissão, e mês em que o Conexa emite duas cobranças vira pico — a
+volta ao normal lia como queda. Quatro clientes com receita estável caíram
+"−50%" no mesmo agosto. Um contrato anual (900,55 em julho, zero no resto) dava
+"−100%". E a regra 3 contava qualquer queda: R$ 86,01 → R$ 84,14 (−2%) era
+"padrão irregular". Subir o limiar não resolve — a base de comparação é que
+estava errada. Agora a métrica compara com a **mediana dos 3 meses anteriores**
+(`quedaContraBase`) e a regra 3 exige **queda mínima de 10% por passo**. Isso
+dispensou excluir os 328 contratos anuais, que era a outra saída e escondia um
+terço da base: 0, 0, 900, 0 tem mediana zero, que é "sem base", não queda.
+
+**2. O Radar contava reservas de meses futuros como "horas no mês".** A consulta
+de `fila.ts` tinha `dataLocal >= início do mês` e nenhum limite superior. Os "64h
+no mês" de um cliente eram 16h × setembro, outubro, novembro e dezembro —
+reservas recorrentes já agendadas. O defeito é anterior a 2026-09-16; só
+apareceu quando a fila foi ligada ao Radar. A ficha filtrava certo, então os dois
+discordavam sobre o mesmo cliente.
+
+**3. As regras 4 e 10 ofertavam pacote de horas a quem já tinha.** As reservas
+de cinco dos seis clientes conferidos vinham com `deductedFromQuota` — o Conexa
+abatendo de uma cota que o espelho não enxerga. Conferido na fonte pelo MCP do
+Conexa: três têm pacote em venda recorrente, **dois não** (a cota vem de outra
+via). O status pega os cinco; sincronizar `recurringSales` pegaria três. Então a
+evidência de posse é o status (`temEvidenciaDeCota`), com janela de 3 meses. E a
+regra 4 passa a contar só hora **faturada** como avulso: nenhum dos seis tinha
+hora `billed`/`paid` em jul–set, e oferecer "pacote sai mais barato que avulso" a
+quem não paga por hora é a oferta errada.
+
+As duas camadas — ficha (`avaliar.ts`) e Radar (`fila.ts`) — passam a chamar as
+**mesmas** funções puras. Foi a lógica duplicada que as deixou discordar.
+
+De passagem: `partiallyPaid` não estava em balde nenhum, caía em "status
+desconhecido" e tornava o ciclo inconclusivo — um cliente que estourou a cota e
+pagou parte deixava de confirmar o excedente, em silêncio. Agora é faturado. E
+desligar um gatilho nativo congelava a nota do catálogo no banco; a nota só é
+gravada quando editada.
+
+**O que ficou em produção antes do deploy:** métrica, 3 e 4 desligadas pelo
+MCP. A 10 não — o classificador de permissões do modo automático barrou a
+escrita, e ela precisa ser desligada na tela ou religada depois do deploy
+conforme a medição.
+
+**Achado de negócio, em aberto:** reservas `notBilled` saltaram de 1h em junho
+para 406h em agosto e 369h em setembro. Pode ser cortesia deliberada, pode ser
+cobrança parada — é pergunta para o comercial, não conclusão.
+
+O `.mcp.json` saiu do repositório: com `MCP_URL` vazio caía em `localhost`, e
+conflitava com o registro de quem fazia certo. A documentação do MCP ganhou o
+domínio de produção, o comando para Windows e a armadilha da letra do drive.
+
+168 testes (eram 152). Os casos novos são as séries reais que davam sinal falso,
+sem nome de cliente.
+
+---
+
 ## 2026-09-16 — MCP, configuração editável e o Radar mostrando o que já existia
 
 **O Radar mostrava um gatilho de doze.** `fila.ts` avaliava as 12 regras em lote

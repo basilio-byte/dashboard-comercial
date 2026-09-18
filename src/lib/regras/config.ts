@@ -83,7 +83,9 @@ function resolver(
     peso: linha?.peso ?? nativo?.peso ?? 50,
     ordem: linha?.ordem ?? nativo?.ordem ?? 99,
     nativo: linha ? linha.nativo : true,
-    nota: linha?.nota ?? nativo?.nota ?? "",
+    // `||` e não `??`: nota vazia no banco devolve a do catálogo. Ver a nota
+    // sobre congelamento em `salvarGatilho`.
+    nota: linha?.nota || nativo?.nota || "",
     // ⚠ O bloqueio vem SEMPRE do catálogo, nunca do banco: é fato medido
     // contra a API (o 404 de `/packages`), e deixar alguém "destravar" a regra
     // 2 pela tela seria oferecer um botão que não faz nada.
@@ -200,6 +202,17 @@ export async function salvarGatilho(
     edicao = { ...edicao, params: r.data as Record<string, unknown> };
   }
 
+  /**
+   * ⚠ A NOTA só é gravada quando alguém a edita.
+   *
+   * A versão anterior copiava `antes.nota` — a nota resolvida, que para um
+   * nativo nunca editado É a do catálogo — para a linha nova. Desligar um
+   * gatilho congelava a documentação daquele dia no banco. Achado em 2026-09-18:
+   * as regras 3, 4 e métrica foram desligadas horas antes de as notas delas
+   * ganharem a explicação da correção, e a tela continuaria mostrando a antiga.
+   */
+  const linhaAntes = await prisma.gatilho.findUnique({ where: { codigo }, select: { nota: true } });
+
   const dados = {
     nome: edicao.nome ?? antes.nome,
     familia: antes.familia,
@@ -209,7 +222,12 @@ export async function salvarGatilho(
     params: (edicao.params ?? antes.params) as Prisma.InputJsonValue,
     peso: edicao.peso ?? antes.peso,
     ordem: edicao.ordem ?? antes.ordem,
-    nota: edicao.nota === undefined ? antes.nota : edicao.nota,
+    nota:
+      edicao.nota !== undefined
+        ? edicao.nota
+        : antes.nativo
+          ? (linhaAntes?.nota ?? null)
+          : antes.nota,
     nativo: antes.nativo,
     atualizadoPor: ctx.quem,
   };
