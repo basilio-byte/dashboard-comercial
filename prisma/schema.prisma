@@ -717,6 +717,9 @@ enum SegmentoCategoria {
   SEABOX
   DEPOSITO
   SERVICOS_DE_ESPACO
+  /// Programa com começo e fim (ex.: Hub Empreendedoras). O fim do contrato é
+  /// CONCLUSÃO, não saída — e vira sinal de continuidade, não de reconquista.
+  PROGRAMA
   OUTRO
   /// Classificada como "não interessa a regra nenhuma" — diferente de não
   /// classificada, que é ausência de resposta.

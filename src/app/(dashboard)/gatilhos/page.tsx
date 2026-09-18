@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
  * Os quatro estados respondem **de quem é a próxima ação**:
  *  - avaliando — está rodando;
  *  - desligado — alguém desligou aqui, e religa aqui;
- *  - bloqueado — depende do admin do Conexa liberar um endpoint;
+ *  - bloqueado — depende do Conexa: o saldo do pacote não sai por endpoint nenhum;
  *  - sem dado — depende da carga terminar.
  */
 
@@ -55,7 +55,7 @@ const ESTILO: Record<Estado, { Icone: LucideIcon; selo: string; rotulo: string; 
     Icone: Ban,
     selo: "selo-critico",
     rotulo: "bloqueado por terceiro",
-    deQuem: "depende do admin do Conexa",
+    deQuem: "depende do Conexa, não de código",
   },
   semDado: {
     Icone: CircleDashed,
@@ -176,9 +176,10 @@ export default async function Gatilhos() {
 
         <Nota>
           Gatilho <strong>bloqueado</strong> não é o mesmo que desligado: as regras 2 e 9 dependem
-          de <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code>,
-          que responde <strong>404 por permissão</strong> deste token. Ligar não faria efeito —
-          quem destrava é o admin do Conexa. E nada nesta tela cria task em lugar nenhum: a camada
+          do conteúdo do pacote de horas, que{" "}
+          <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code> nega a
+          este token e nem o MCP oficial do Conexa mostra. Ligar não faria efeito — a pergunta é
+          para o suporte do Conexa. E nada nesta tela cria task em lugar nenhum: a camada
           de disparo não existe.
         </Nota>
       </div>

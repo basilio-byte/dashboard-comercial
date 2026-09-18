@@ -1,6 +1,7 @@
 import { CircleCheck, CircleDashed, CircleQuestionMark, PowerOff, TriangleAlert, type LucideIcon } from "lucide-react";
 import { sinaisDoCliente, type EstadoSinal } from "@/lib/regras/avaliar";
 import { Nota, Painel, Rolante, Secao } from "@/components/Cartao";
+import { rotuloDaRegra } from "@/lib/regras/catalogo";
 import { cn } from "@/lib/ui";
 
 /**
@@ -144,7 +145,7 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
                     <td>
                       <span className="font-medium">{s.nome}</span>
                       <span className="selo ml-2">
-                        {/^\d+$/.test(s.regra) ? `regra ${s.regra}` : s.regra}
+                        {rotuloDaRegra(s.regra)}
                       </span>
                       {s.evidencia ? (
                         <div className="mt-0.5 text-[12.5px] font-medium text-[var(--critico-tinta)]">

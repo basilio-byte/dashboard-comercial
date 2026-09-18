@@ -121,7 +121,7 @@ export const ferramentasDeConfiguracao = [
     nome: "gatilho_remover",
     titulo: "Remover gatilho",
     descricao:
-      "Remove um gatilho CRIADO aqui dentro. Gatilho nativo (as 12 regras do documento) não pode " +
+      "Remove um gatilho CRIADO aqui dentro. Gatilho nativo (os do documento e os medidos em produção) não pode " +
       "ser removido — desligue-o com gatilho_atualizar. Remover órfã os contatos que registram " +
       "tê-lo usado como motivo.",
     entrada: z.object({ codigo: z.string() }),

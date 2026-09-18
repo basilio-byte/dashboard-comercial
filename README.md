@@ -139,7 +139,9 @@ ninguém clicar em nada.
 **Funciona hoje:** espelho do Conexa por janela mensal (clientes, contratos, planos, produtos,
 categorias, vendas, cobranças, reservas) · receita por cliente e por mês com variação · consumo de
 horas por ciclo com o sinal de **excedente recorrente** · reconciliação com histórico · registro
-manual de contato · **motor de regras** avaliando os 12 gatilhos em lote sobre a base inteira ·
+manual de contato · **motor de regras** avaliando 16 gatilhos nativos em lote sobre a base inteira —
+os 12 do documento, três sinais de saída (contrato perdido, reduzido, programa concluído) e o freio
+de cobrança em atraso ·
 **configuração editável pela tela** (limiares, liga-desliga, gatilho novo, classificação de
 categoria, cadastro de agentes) · **servidor MCP** · as telas
 **Radar · Carteira · Gatilhos · Agentes · Confiança · Motor**.
@@ -160,7 +162,10 @@ Ponto de retomada detalhado: [progress.md](docs/context/progress.md) e
 
 ## MCP
 
-O painel expõe um servidor MCP em `/api/mcp` — 31 ferramentas, 18 de leitura e 13 de escrita.
+O painel expõe um servidor MCP em `/api/mcp` — 32 ferramentas, 19 de leitura e 13 de escrita.
+Cada pessoa cria o próprio token em **Minha conta**; o `MCP_TOKEN` do ambiente é o master, para
+desenvolvimento. Depois de mexer no motor de regras, `conferir_consistencia` verifica se o Radar
+e a ficha do cliente dizem a mesma coisa.
 
 ```bash
 claude mcp add --transport http --scope local seahub-comercial \

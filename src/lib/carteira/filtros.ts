@@ -1,5 +1,7 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, SegmentoCategoria } from "@prisma/client";
+import { LACUNA_SALDO_PACOTE } from "@/lib/regras/catalogo";
+import { lerCategorias, ROTULO_SEGMENTO } from "@/lib/regras/segmentos";
 import { prisma } from "@/lib/db";
 import { nowInAppTz, ultimoMesFechado } from "@/lib/dates";
 import { clientesComExcedente } from "@/lib/intel/horas";
@@ -35,8 +37,17 @@ export type OrdenarPor = "receita" | "nome" | "horas" | "variacao" | "contratoDe
 
 export interface FiltroCarteira {
   busca?: string;
-  /** Segmentos do perfil consolidado (derivados de contrato → plano → categoria). */
+  /** NOMES de categoria, como o perfil consolidado os guarda. */
   segmentos?: string[];
+  /**
+   * Segmento CLASSIFICADO — a mesma leitura que as regras usam: manual primeiro
+   * (tela Gatilhos), nome da categoria depois.
+   *
+   * ⚠ O filtro "Segmento" da tela lia os NOMES de categoria do perfil, e a
+   * classificação do Diego ("Meu Depósito" → depósito) não mudava nada nele.
+   * Duas palavras iguais para duas coisas diferentes.
+   */
+  segmentoClassificado?: SegmentoCategoria;
   /** Unidade física, das categorias classificadas à mão. */
   unidade?: string;
   planoConexaId?: number;
@@ -92,10 +103,7 @@ export interface ResultadoDaCarteira {
   mesDaVariacao: string;
 }
 
-export const LACUNA_HORAS_DISPONIVEIS =
-  "horas disponíveis (saldo do pacote): não é calculável — as horas do pacote vêm de " +
-  "`recurringSales.packageId` e `/packages` responde 404 por permissão deste token. " +
-  "Depende de liberação do admin do Conexa, não de desenvolvimento.";
+export const LACUNA_HORAS_DISPONIVEIS = `horas disponíveis: ${LACUNA_SALDO_PACOTE}`;
 
 export async function buscarCarteira(f: FiltroCarteira = {}): Promise<ResultadoDaCarteira> {
   const limite = Math.min(Math.max(f.limite ?? 50, 1), 500);
@@ -144,6 +152,24 @@ export async function buscarCarteira(f: FiltroCarteira = {}): Promise<ResultadoD
   // ── Filtros que passam por contrato → plano → categoria ──────────────────
   const porContrato: Prisma.ContractWhereInput[] = [];
   if (f.planoConexaId !== undefined) porContrato.push({ planConexaId: f.planoConexaId });
+
+  if (f.segmentoClassificado) {
+    const doSegmento = (await lerCategorias())
+      .filter((c) => c.segmento === f.segmentoClassificado)
+      .map((c) => c.conexaId);
+    const planos = doSegmento.length
+      ? await prisma.plan.findMany({
+          where: { serviceCategoryConexaId: { in: doSegmento } },
+          select: { conexaId: true },
+        })
+      : [];
+    if (!doSegmento.length) {
+      avisos.push(
+        `nenhuma categoria está classificada como "${ROTULO_SEGMENTO[f.segmentoClassificado]}" — classifique na tela Gatilhos.`,
+      );
+    }
+    porContrato.push({ planConexaId: { in: planos.map((p) => p.conexaId) } });
+  }
 
   if (f.categoriaConexaId !== undefined || f.unidade) {
     let catIds: number[] = [];
@@ -329,11 +355,13 @@ export async function buscarCarteira(f: FiltroCarteira = {}): Promise<ResultadoD
 /** As opções que a tela oferece nos seletores — vindas do dado, não escritas. */
 export async function opcoesDeFiltro(): Promise<{
   segmentos: string[];
+  /** Segmentos classificados com ao menos uma categoria em uso. */
+  segmentosClassificados: Array<{ segmento: SegmentoCategoria; rotulo: string }>;
   unidades: string[];
   planos: Array<{ conexaId: number; nome: string; horasInclusasMes: number | null; contratos: number }>;
   categorias: Array<{ conexaId: number; nome: string }>;
 }> {
-  const [perfis, unidades, planos, categorias, contratosPorPlano] = await Promise.all([
+  const [perfis, unidades, planos, categorias, contratosPorPlano, leituras] = await Promise.all([
     prisma.customerProfile.findMany({ select: { segmentos: true }, take: 5000 }),
     prisma.categoriaClassificacao.findMany({
       where: { unidade: { not: null } },
@@ -354,7 +382,15 @@ export async function opcoesDeFiltro(): Promise<{
       where: { isActive: true },
       _count: true,
     }),
+    lerCategorias(),
   ]);
+  const segmentosEmUso = [
+    ...new Set(
+      leituras
+        .filter((c) => c.planos > 0 && c.segmento !== null && c.segmento !== "IGNORAR")
+        .map((c) => c.segmento!),
+    ),
+  ];
 
   const usoPor = new Map(
     contratosPorPlano
@@ -364,6 +400,9 @@ export async function opcoesDeFiltro(): Promise<{
 
   return {
     segmentos: [...new Set(perfis.flatMap((p) => p.segmentos))].sort(),
+    segmentosClassificados: segmentosEmUso
+      .map((segmento) => ({ segmento, rotulo: ROTULO_SEGMENTO[segmento] }))
+      .sort((a, b) => a.rotulo.localeCompare(b.rotulo)),
     unidades: unidades.map((u) => u.unidade!).sort(),
     // Só planos COM contrato ativo: um seletor com 300 planos mortos não é
     // filtro, é lista telefônica.

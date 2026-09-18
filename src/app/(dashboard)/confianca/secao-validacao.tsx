@@ -54,8 +54,9 @@ export async function SecaoValidacao() {
           As regras 2 e 9 <strong>não estão esperando este veredito</strong> — estão desligadas
           desde 2026-08-27, por 404 de permissão em{" "}
           <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code>.
-          Voltam a ser discutíveis quando o admin do Conexa liberar o endpoint. Melhor desligado
-          que ofertando pacote para quem tem 20h sobrando.
+          Nem o MCP oficial do Conexa, com permissão total, mostra o conteúdo do pacote (medido em
+          2026-09-18) — voltam a ser discutíveis quando o suporte do Conexa apontar um endpoint.
+          Melhor desligado que ofertando pacote para quem tem 20h sobrando.
         </Instrucao>
       </div>
 

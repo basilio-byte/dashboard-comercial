@@ -108,12 +108,16 @@ A ponte move bytes e nada mais. Toda decisão vive no servidor.
 
 ## As ferramentas
 
-31 ao todo; 18 leem, 13 escrevem.
+32 ao todo; 19 leem, 13 escrevem.
 
 ### Consulta
 `estado_do_espelho` · `listar_clientes` · `opcoes_de_filtro` · `cliente` ·
 `sinais_do_cliente` · `fila_de_sinais` · `receita` · `horas_do_cliente` ·
-`catalogo` · `listar_contatos`
+`catalogo` · `listar_contatos` · `conferir_consistencia`
+
+`conferir_consistencia` compara o Radar com a ficha de cada cliente da fila, e
+sorteia clientes fora dela. É a forma de saber que as duas leituras da mesma
+regra dizem a mesma coisa — ver ADR-0013.
 
 ### Configuração (as três coisas editáveis)
 `gatilhos_listar` · `gatilho_atualizar` · `gatilho_criar` · `gatilho_remover` ·

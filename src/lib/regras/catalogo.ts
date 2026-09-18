@@ -71,6 +71,13 @@ export const paramsPorFamilia = {
      * emissão, vem zerado por renegociação ou dobrado por calendário.
      */
     mesesAvaliados: z.number().int().min(1).max(6).default(2),
+    /**
+     * `queda_sustentada`: abaixo desta base (R$/mês) não se fala em queda.
+     * ⚠ Medido em 2026-09-18: um contrato anual com cobranças avulsas
+     * esporádicas tinha "base" de R$ 18/mês, e zero depois disso virava
+     * "−100%", no topo do Radar.
+     */
+    baseMinima: z.number().min(0).max(100000).default(50),
   }),
 
   /** Regra 4 — ">5h no mês sem contrato com cota". */
@@ -117,7 +124,11 @@ export const paramsPorFamilia = {
 
   /** Perdeu o contrato, ou passou a pagar menos — é fato, não inferência. */
   MUDANCA_CONTRATO: z.object({
-    modo: z.enum(["perdeu", "reduziu"]).default("perdeu"),
+    /**
+     * `perdeu` e `reduziu` olham os contratos de PERMANÊNCIA; `concluiu` olha
+     * os de categoria PROGRAMA, cujo fim é conclusão, não saída.
+     */
+    modo: z.enum(["perdeu", "reduziu", "concluiu"]).default("perdeu"),
     /** Quantos dias para trás olhar. */
     janelaDias: z.number().int().min(1).max(365).default(45),
     /** `reduziu`: quanto o valor mensal contratado precisa ter caído. */
@@ -179,7 +190,49 @@ export function lerParams<F extends Familia>(
 }
 
 // ---------------------------------------------------------------------------
-// Os gatilhos nativos — os 12 avaliados hoje
+// Textos e medidas compartilhados — UMA fonte, para não divergirem
+// ---------------------------------------------------------------------------
+
+/**
+ * A lacuna do saldo do pacote de horas, com a pergunta certa.
+ *
+ * ⚠ Estava escrita em nove lugares — tela, ficha, filtro, instruções do MCP —
+ * dizendo "depende de o admin do Conexa liberar o endpoint". Em 2026-09-18 o
+ * MCP oficial do Conexa, com permissão total, também não mostrou o conteúdo
+ * do pacote: a pergunta passou a ser para o SUPORTE. Metade dos textos mudou e
+ * metade não. Agora todos leem daqui.
+ */
+export const LACUNA_SALDO_PACOTE =
+  "o saldo do pacote de horas não é calculável: as horas vêm de `recurringSales.packageId`, " +
+  "`/packages` responde 404 a este token, e nem o MCP oficial do Conexa — testado com permissão " +
+  "total em 2026-09-18 — mostra o conteúdo do pacote. A pergunta é para o SUPORTE do Conexa: " +
+  "existe endpoint para as horas incluídas e o consumo de um pacote?";
+
+/**
+ * Como um código de gatilho aparece na tela: "regra 4" para os do documento,
+ * o próprio código para os outros ("extra", "contrato-perdido").
+ *
+ * ⚠ Era montado à mão em três telas, cada uma com a exceção só para "extra" e
+ * "métrica" — e os gatilhos novos apareciam como "regra contrato-perdido".
+ */
+export function rotuloDaRegra(codigo: string): string {
+  return /^\d+$/.test(codigo) ? `regra ${codigo}` : codigo;
+}
+
+/**
+ * Peso na fila a partir do DINHEIRO em jogo, em R$/mês.
+ *
+ * ⚠ Os sinais de saída pesavam pela PORCENTAGEM: −100% sobre R$ 18 pesava o
+ * mesmo que sobre R$ 2.000, e um contrato de R$ 24 perdido passava na frente de
+ * um cliente de R$ 1.280/mês. +1 a cada R$ 25/mês, com teto de +60 (R$ 1.500/mês)
+ * para um único cliente grande não achatar o resto da fila.
+ */
+export function pesoPorValor(base: number, reaisPorMes: number): number {
+  return base + Math.min(60, Math.max(0, reaisPorMes) / 25);
+}
+
+// ---------------------------------------------------------------------------
+// Os gatilhos nativos
 // ---------------------------------------------------------------------------
 
 export interface GatilhoNativo {
@@ -238,9 +291,8 @@ export const NATIVOS: GatilhoNativo[] = [
     params: { limiarHoras: 10 },
     peso: 70,
     ordem: 2,
-    bloqueio:
-      "as horas do pacote vêm de `recurringSales.packageId`, e `/packages` responde 404 por permissão deste token — o saldo não é calculável por código",
-    nota: "depende de liberação do admin do Conexa, não de desenvolvimento",
+    bloqueio: LACUNA_SALDO_PACOTE,
+    nota: "depende do Conexa responder se há endpoint para as horas do pacote — não de desenvolvimento",
   },
   {
     codigo: "3",
@@ -323,9 +375,8 @@ export const NATIVOS: GatilhoNativo[] = [
     params: { limiarHoras: 5 },
     peso: 75,
     ordem: 9,
-    bloqueio:
-      "as horas do pacote vêm de `recurringSales.packageId`, e `/packages` responde 404 por permissão deste token — o saldo não é calculável por código",
-    nota: "depende de liberação do admin do Conexa, não de desenvolvimento",
+    bloqueio: LACUNA_SALDO_PACOTE,
+    nota: "depende do Conexa responder se há endpoint para as horas do pacote — não de desenvolvimento",
   },
   {
     codigo: "10",
@@ -345,8 +396,8 @@ export const NATIVOS: GatilhoNativo[] = [
     familia: "TENDENCIA",
     oferta: "olhar antes que o cliente saia",
     condicao: "os 2 últimos meses fechados abaixo de 70% da mediana dos 6 anteriores",
-    params: { modo: "queda_sustentada", mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 },
-    peso: 35,
+    params: { modo: "queda_sustentada", mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30, baseMinima: 50 },
+    peso: 40,
     ordem: 11,
     bloqueio: null,
     nota: "QUEDA SUSTENTADA: dois meses fechados seguidos abaixo do normal — um mês isolado vem zerado por renegociação ou dobrado por calendário · quem renegociou no período é ambíguo, não queda · o mês em curso só desmente, nunca dispara · ⚠ o limiar de 30% é exemplo do documento, não decisão do cliente",
@@ -361,7 +412,7 @@ NATIVOS.push(
     oferta: "entender a saída — e tentar reconquistar",
     condicao: "o último contrato terminou nos últimos 45 dias e o cliente ficou sem nenhum",
     params: { modo: "perdeu", janelaDias: 45, limiarPct: 20 },
-    peso: 80,
+    peso: 40,
     ordem: 12,
     bloqueio: null,
     nota: "é fato, não inferência — 29 clientes em 45 dias quando foi medido (2026-09-18), e ninguém era avisado · chega depois da saída: o contrato quase nunca avisa antes, porque 1.338 contratos ativos não têm data de fim",
@@ -373,7 +424,7 @@ NATIVOS.push(
     oferta: "entender a redução antes que vire saída",
     condicao: "o valor mensal contratado caiu 20% ou mais nos últimos 45 dias",
     params: { modo: "reduziu", janelaDias: 45, limiarPct: 20 },
-    peso: 70,
+    peso: 45,
     ordem: 13,
     bloqueio: null,
     nota: "o sinal mais limpo medido: das 6 trocas de contrato em 45 dias, 4 eram reduções reais (R$ 2.000 → R$ 119, R$ 1.900 → R$ 99,90) e as 2 renovações pelo mesmo valor não disparam · contrato anual entra pelo valor mensal (÷ 12)",
@@ -389,6 +440,18 @@ NATIVOS.push(
     ordem: 14,
     bloqueio: null,
     nota: "não aparece no Radar: SUSPENDE as ofertas de venda (marcos, pacote, primeira reserva, excedente) de quem está devendo · não suspende os sinais de saída — com quem está saindo a conversa acontece mesmo com dívida · desligar o freio devolve as ofertas",
+  },
+  {
+    codigo: "programa-concluido",
+    nome: "Concluiu um programa",
+    familia: "MUDANCA_CONTRATO",
+    oferta: "oferecer continuidade — coworking, sala ou Endereço Fiscal",
+    condicao: "contrato de categoria PROGRAMA terminou nos últimos 45 dias e o cliente não tem contrato de permanência",
+    params: { modo: "concluiu", janelaDias: 45, limiarPct: 20 },
+    peso: 55,
+    ordem: 15,
+    bloqueio: null,
+    nota: "achado em 2026-09-18: 8 dos 23 \"perdeu o contrato\" eram a turma do Hub Empreendedoras, que terminou junta em 17/08 — não saíram, concluíram. Egressa é público de continuidade, não de reconquista · só funciona com a categoria do programa classificada como PROGRAMA na tela Gatilhos",
   },
 );
 

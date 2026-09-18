@@ -2,7 +2,7 @@ import "server-only";
 import { prisma } from "@/lib/db";
 import { keyToUtcDate, todayKey, currentMonthKey, ultimosMesesFechados } from "@/lib/dates";
 import { formatBRL, money, type Money } from "@/lib/money";
-import { horasDoCliente, type HorasDoCliente } from "@/lib/intel/horas";
+import { concessaoDoContrato, horasDoCliente, type HorasDoCliente } from "@/lib/intel/horas";
 import {
   litoralReservouSala,
   marcoAtingido,
@@ -20,7 +20,7 @@ import {
   type ContratoParaValor,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
-import { FAMILIAS_DE_VENDA, lerParams } from "./catalogo";
+import { FAMILIAS_DE_VENDA, LACUNA_SALDO_PACOTE, lerParams } from "./catalogo";
 import { carregarSegmentos, type MapaDeSegmentos } from "./segmentos";
 
 /**
@@ -99,6 +99,12 @@ interface ContextoDoCliente {
    * em `hourQuotas` é "plano sem horas inclusas", que é diferente de zero.
    */
   planoSemCota(planConexaId: number | null): boolean;
+  /**
+   * Algum contrato vigente tem cota de horas — pela `concessaoDoContrato`, a
+   * MESMA função que a fila usa. Antes eram duas definições, e um array vazio
+   * em `hourPlanQuotaRaw` era cota no Radar e não era na ficha.
+   */
+  temCotaNoContrato: boolean;
   segmentos: MapaDeSegmentos;
   horas: HorasDoCliente;
   /** Todas as horas reservadas no mês corrente, qualquer status. */
@@ -168,6 +174,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
       where: { customerConexaId },
       select: {
         conexaId: true,
+        planConexaId: true,
         amount: true,
         paymentFrequency: true,
         startDate: true,
@@ -185,7 +192,11 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     }),
   ]);
 
-  const planoIds = [...new Set(contratos.map((c) => c.planConexaId).filter((x): x is number => x !== null))];
+  const planoIds = [
+    ...new Set(
+      [...contratos, ...todosContratos].map((c) => c.planConexaId).filter((x): x is number => x !== null),
+    ),
+  ];
   const planos = planoIds.length
     ? await prisma.plan.findMany({ where: { conexaId: { in: planoIds } } })
     : [];
@@ -302,7 +313,12 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     startDate: c.startDate,
     endDate: c.endDate,
     isActive: c.isActive,
+    foraDaPermanencia: segmentos.foraDaPermanencia(categoriaDo(c.planConexaId).id),
   }));
+  const temCotaNoContrato = contratos.some(
+    (c) =>
+      concessaoDoContrato(c, c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined).concedido !== null,
+  );
   const cobrancas: CobrancaParaFreio[] = cobrancasBrutas.map((c) => ({
     status: c.status,
     dueDate: c.dueDate,
@@ -336,6 +352,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     })),
     categoriaDo,
     planoSemCota,
+    temCotaNoContrato,
     segmentos,
     horas,
     horasNoMes,
@@ -430,10 +447,7 @@ function avaliarFamilia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base)
       return {
         ...base,
         estado: "DADO_INDISPONIVEL",
-        motivo:
-          "As horas do pacote comprado vêm de `recurringSales.packageId`, e `/packages` responde " +
-          "404 por permissão deste token. O saldo não é calculável — depende de o admin do Conexa " +
-          "liberar o endpoint.",
+        motivo: LACUNA_SALDO_PACOTE.charAt(0).toUpperCase() + LACUNA_SALDO_PACOTE.slice(1) + ".",
       };
   }
 }
@@ -447,6 +461,24 @@ function mudancaContrato(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base
     limiarPct: p.limiarPct,
   });
   const brl = (v: Money | null) => (v ? formatBRL(v) : "R$ 0,00");
+
+  if (p.modo === "concluiu") {
+    if (r.concluiu) {
+      return {
+        ...base,
+        estado: "ATIVO",
+        motivo: `Contrato #${r.programaEncerrado!.conexaId}, de categoria PROGRAMA, terminou em ${fmtDia(r.programaEncerrado!.endDate!)} — e o cliente não tem contrato de permanência. É egresso, não ex-cliente: a conversa é de continuidade.`,
+        evidencia: `concluiu em ${fmtDia(r.programaEncerrado!.endDate!)}`,
+      };
+    }
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: r.programaEncerrado
+        ? `Concluiu um programa, mas já tem contrato de permanência (${brl(r.agora)}/mês).`
+        : `Nenhum contrato de categoria PROGRAMA terminou nos últimos ${p.janelaDias} dias.`,
+    };
+  }
 
   if (p.modo === "perdeu") {
     if (r.perdeu) {
@@ -478,9 +510,11 @@ function mudancaContrato(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base
   return {
     ...base,
     estado: "NAO_APLICAVEL",
-    motivo: !r.antes
-      ? `Sem contrato vigente ${p.janelaDias} dias atrás — não há base para comparar.`
-      : !r.agora
+    // ⚠ `!r.antes` não pega contrato de valor ZERO (é um Decimal, e objeto é
+    // verdadeiro): a ficha dizia "variou 0,0% (R$ 0,00 → R$ 0,00)".
+    motivo: !r.antes || r.antes.lessThanOrEqualTo(0)
+      ? `Sem valor contratado ${p.janelaDias} dias atrás — não há base para comparar.`
+      : !r.agora || r.agora.lessThanOrEqualTo(0)
         ? "Sem contrato vigente hoje — isso é o gatilho \"perdeu o contrato\", não redução."
         : `Valor mensal contratado ${r.variacaoPct === 0 ? "igual" : `variou ${num(r.variacaoPct ?? 0)}%`} nos últimos ${p.janelaDias} dias (${brl(r.antes)} → ${brl(r.agora)}).`,
   };
@@ -605,7 +639,7 @@ function marco(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
 
 function usoSemCota(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   const p = lerParams("USO_SEM_COTA", g.params).params;
-  const cotaNoContrato = ctx.horas.contratos.some((c) => c.concedido !== null);
+  const cotaNoContrato = ctx.temCotaNoContrato;
   // ⚠ Pacote via venda recorrente não aparece em contrato nem plano, mas o
   // Conexa abate as reservas dele. Sem isto, a regra reofertava pacote a quem
   // já tinha pacote — medido em 2026-09-18.
@@ -748,12 +782,20 @@ function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sin
       mesesDeBase: p.mesesDeBase,
       limiarPct: p.limiarPct,
       mesEmCurso: ctx.receitaMesEmCurso,
+      baseMinima: p.baseMinima,
     });
     if (r.semBase === "SERIE_CURTA") {
       return { ...base, estado: "DADO_INDISPONIVEL", motivo: `Menos de ${p.mesesAvaliados + 3} meses fechados — não há base para comparar.` };
     }
     if (r.semBase === "BASE_ZERO") {
       return { ...base, estado: "NAO_APLICAVEL", motivo: "Sem receita típica nos meses de base (mediana zero) — não existe base, e zero depois de zero não é queda." };
+    }
+    if (r.semBase === "BASE_PEQUENA") {
+      return {
+        ...base,
+        estado: "NAO_APLICAVEL",
+        motivo: `Receita típica de ${formatBRL(r.base!)}/mês, abaixo do mínimo de ${formatBRL(p.baseMinima)} — pequena demais para chamar variação de queda.`,
+      };
     }
     const baseTxt = formatBRL(r.base!);
     if (r.disparou) {

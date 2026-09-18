@@ -281,3 +281,46 @@ Nenhuma regra dispara sem passar pelo **gate de elegibilidade** (cliente ativo, 
 contrato vigente, sem inadimplência dura) e pelas **supressões** ("já possui", "já recusou") —
 ver [ADR-0010](decisions.md). E nenhuma roda sobre dado velho ou incompleto —
 [ADR-0011](decisions.md).
+
+---
+
+## O que mudou em produção — 2026-09-18
+
+As 10 regras acima são a **especificação** do Diego. O estado vivo — limiar,
+liga-desliga, oferta — está no banco e na tela **Gatilhos**, e o MCP lê de lá.
+Esta seção registra o que a medição contra a produção mudou, para a
+especificação e o motor não divergirem em silêncio.
+
+### Gatilhos acrescentados
+
+| Código | Família | Pergunta | Por quê |
+|---|---|---|---|
+| `contrato-perdido` | MUDANCA_CONTRATO | o último contrato de permanência terminou e não há outro | 29 clientes em 45 dias, e ninguém era avisado |
+| `contrato-reduzido` | MUDANCA_CONTRATO | o valor MENSAL contratado caiu 20% ou mais | o sinal mais limpo medido: 4 de 4 reduções reais, 0 falsos |
+| `programa-concluido` | MUDANCA_CONTRATO | um contrato de categoria PROGRAMA terminou e não há permanência | a turma do Hub Empreendedoras aparecia como "perdeu o contrato" |
+| `freio` | SAUDE_FINANCEIRA | cobrança vencida há 15–105 dias, ou renegociada em 90 | não gera sinal: **suspende as ofertas de venda** |
+
+### Critérios corrigidos (medidos, não opinião)
+
+- **Regra 4 — hora avulsa é hora com VENDA de valor**, não hora com status
+  `billed`/`paid`. Desde ago/2026 a sala é cobrada na fatura do mês seguinte, e
+  a reserva fica `notBilled`. Pelo status, a regra zerava; pelo valor da venda,
+  aponta 4 clientes.
+- **Regras 4 e 10 — reserva `deductedFromQuota` prova posse de cota**, mesmo sem
+  cota em contrato ou plano (pacote via venda recorrente). Sem isso, as duas
+  ofertavam pacote a quem já tinha.
+- **Excedente — `notBilled` com venda de valor é hora faturada** (a hora além
+  da cota também vai para a fatura do mês seguinte).
+- **Métrica (§1) — queda SUSTENTADA**: dois meses fechados seguidos abaixo de
+  70% da base, com base = a MENOR entre a mediana e a média aparada dos 6
+  meses anteriores, e base mínima de R$ 50/mês. Um mês isolado, no regime de
+  emissão, vem zerado por renegociação ou dobrado por calendário. Quem
+  renegociou no período é AMBÍGUO. O mês em curso só desmente.
+- **Regra 3** — uma queda só conta a partir de 10%; oscilação de centavos
+  depois de um pico de cobrança não é padrão.
+
+### Regras 2 e 9 — a pergunta mudou de destino
+
+Nem o MCP oficial do Conexa, com permissão total, mostra o conteúdo do pacote.
+O pedido não é mais "liberem `/packages` para o nosso token" (admin); é "a API
+expõe as horas incluídas e o consumo de um pacote?" (suporte do Conexa).

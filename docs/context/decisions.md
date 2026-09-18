@@ -412,3 +412,46 @@ verificados por grep.
 **Consequência.** Para eliminar a única falha irreversível do sistema, a proteção é o tipo, não a
 disciplina. Segunda camada (`CHATWOOT_PERMITE_OUTGOING=off`) fica como reforço, não como defesa
 principal.
+
+---
+
+## ADR-0013 — Uma regra, duas leituras, e a paridade é verificável
+
+**Contexto.** A mesma regra é avaliada em dois lugares: na ficha do cliente
+(`sinaisDoCliente`, um cliente por vez) e na fila do Radar (`filaDeSinais`, em
+lote). Divergiram três vezes em dois dias, sempre em silêncio: a fila contava
+reservas de meses futuros como "horas do mês"; tinha a própria definição de
+"tem cota" (contava array vazio como cota); e não tinha estado — a regra 3 e a 5
+eram AMBÍGUAS na ficha e sinal comum no Radar.
+
+**Decisão.**
+1. As duas leituras chamam as **mesmas funções puras** para cada pergunta
+   (`familias.ts`, `concessaoDoContrato`, `ehHoraAvulsa`, `temEvidenciaDeCota`).
+   Uma pergunta, uma função.
+2. O item da fila carrega **estado** (ATIVO ou AMBIGUO), o mesmo da ficha.
+3. A paridade é **medida**, não presumida: a ferramenta do MCP
+   `conferir_consistencia` compara Radar e ficha cliente a cliente e sorteia
+   clientes fora da fila. Rodar depois de qualquer mudança no motor.
+
+**Consequência.** Diferença entre as duas leituras deixa de ser algo que se
+descobre por acaso olhando um cliente. As diferenças deliberadas ficam listadas
+na própria ferramenta (excedente AMBÍGUO, oferta suspensa pelo freio).
+
+## ADR-0014 — Critérios medidos em 2026-09-18 que não se revisitam
+
+Cada um corrige um erro real encontrado na produção. "Simplificar" qualquer um
+reintroduz o erro.
+
+- **Hora paga é decidida pelo VALOR da venda, não pelo status da reserva.** A
+  sala passou a ser cobrada numa fatura consolidada do mês seguinte (ago/2026)
+  e a reserva fica `notBilled`.
+- **Reserva `deductedFromQuota` prova posse de cota.** O pacote vem de venda
+  recorrente, que o espelho não vê; o status pega também quem tem cota por
+  outra via (2 de 5 conferidos no Conexa).
+- **Queda de receita só se afirma SUSTENTADA**, contra a menor das duas bases
+  robustas, com base mínima; renegociação é ambígua; o mês em curso só desmente.
+- **O freio suspende VENDA, nunca os sinais de saída.** Com quem está saindo, a
+  conversa acontece mesmo com dívida.
+- **Programa não é permanência.** O fim de um contrato de categoria PROGRAMA é
+  conclusão (sinal de continuidade), não saída.
+- **Peso na fila pelo dinheiro em jogo**, não pela porcentagem.

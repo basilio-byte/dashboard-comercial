@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { keyToUtcDate, todayKey, currentMonthKey, monthBounds, nowInAppTz, ultimosMesesFechados } from "@/lib/dates";
 import { money } from "@/lib/money";
 import { estadoDoEspelho } from "@/lib/intel/completude";
-import { clientesComExcedente } from "@/lib/intel/horas";
+import { clientesComExcedente, concessaoDoContrato } from "@/lib/intel/horas";
 import type { ResultadoContato } from "@prisma/client";
 import {
   litoralReservouSala,
@@ -20,7 +20,7 @@ import {
   type ContratoParaValor,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
-import { FAMILIAS_DE_VENDA, lerParams } from "./catalogo";
+import { FAMILIAS_DE_VENDA, lerParams, pesoPorValor } from "./catalogo";
 import { carregarSegmentos } from "./segmentos";
 
 /**
@@ -59,6 +59,15 @@ export interface ItemDaFila {
   evidencia: string;
   /** Para ordenar entre regras diferentes: quanto maior, mais forte. */
   peso: number;
+  /**
+   * ATIVO ou AMBIGUO — o MESMO estado que a ficha do cliente dá.
+   *
+   * ⚠ Até 2026-09-18 a fila não tinha estado: a regra 3 e a 5 eram AMBIGUO na
+   * ficha e sinal comum no Radar. Medido: GH Engenharia aparecia no Radar pela
+   * regra 3 enquanto a ficha dela dizia "ambíguo". O vendedor via duas
+   * respostas para a mesma pergunta.
+   */
+  estado: "ATIVO" | "AMBIGUO";
 }
 
 export interface UltimoContato {
@@ -124,7 +133,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
    *
    * ⚠ Distinguir os três é o ponto. "Bloqueado por permissão", "desligado por
    * alguém" e "espelho incompleto" produzem a mesma fila vazia e pedem ações
-   * opostas: pedir liberação ao admin do Conexa, religar na tela, ou esperar a
+   * opostas: levar a pergunta ao Conexa, religar na tela, ou esperar a
    * carga terminar. Um aviso genérico manda a pessoa trabalhar no lugar errado.
    */
   const roda = (g: GatilhoResolvido, exigeHoras = false): boolean => {
@@ -199,6 +208,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
         select: {
           conexaId: true,
           customerConexaId: true,
+          planConexaId: true,
           amount: true,
           paymentFrequency: true,
           startDate: true,
@@ -426,6 +436,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
 
   const paraValor = (c: {
     conexaId: number;
+    planConexaId: number | null;
     amount: { toString(): string };
     paymentFrequency: string | null;
     startDate: Date | null;
@@ -438,6 +449,8 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     startDate: c.startDate,
     endDate: c.endDate,
     isActive: c.isActive,
+    // Programa (e categoria ignorada) não é permanência — mesma leitura da ficha.
+    foraDaPermanencia: segmentos.foraDaPermanencia(categoriaDo(c.planConexaId).id),
   });
   const encerradosPor = new Map<number, ContratoParaValor[]>();
   for (const c of encerrados) {
@@ -460,7 +473,13 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
   // ── Avaliação, em memória ───────────────────────────────────────────────
   const itens: ItemDaFila[] = [];
   let suspensosPeloFreio = 0;
-  const add = (id: number, g: GatilhoResolvido, evidencia: string, peso: number) => {
+  const add = (
+    id: number,
+    g: GatilhoResolvido,
+    evidencia: string,
+    peso: number,
+    estado: ItemDaFila["estado"] = "ATIVO",
+  ) => {
     // ⚠ Oferta de VENDA para quem está devendo é a conversa errada. Os sinais
     // de saída (tendência, mudança de contrato) passam: com quem está saindo a
     // conversa acontece mesmo com dívida.
@@ -477,16 +496,56 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       oferta: g.oferta,
       evidencia,
       peso,
+      estado,
     });
   };
 
   const porFamilia = (f: string) => ligados.filter((g) => g.familia === f);
 
+  // Quem comprou SeaBox — só entre os que estrearam agora, que são poucos.
+  const estreantes = porFamilia("PRIMEIRO_EVENTO").length
+    ? [...primeiraPor.entries()].filter(([, d]) => {
+        if (!d) return false;
+        return porFamilia("PRIMEIRO_EVENTO").some((g) => {
+          const p = lerParams("PRIMEIRO_EVENTO", g.params).params;
+          return (
+            d >= keyToUtcDate(p.desde) &&
+            marcoAtingido({ inicio: d, meses: 0, hoje, toleranciaDias: p.toleranciaDias })
+          );
+        });
+      }).map(([id]) => id)
+    : [];
+  const compraramSeaBox = new Set<number>();
+  if (estreantes.length) {
+    const catsSeaBox = categorias.filter((c) => segmentos.ehSeaBox(c.conexaId, c.name)).map((c) => c.conexaId);
+    const produtosSeaBox = catsSeaBox.length
+      ? await prisma.product.findMany({
+          where: { serviceCategoryConexaId: { in: catsSeaBox } },
+          select: { conexaId: true },
+        })
+      : [];
+    if (produtosSeaBox.length) {
+      const vendas = await prisma.sale.findMany({
+        where: {
+          customerConexaId: { in: estreantes },
+          productConexaId: { in: produtosSeaBox.map((x) => x.conexaId) },
+        },
+        select: { customerConexaId: true },
+        distinct: ["customerConexaId"],
+      });
+      for (const v of vendas) if (v.customerConexaId !== null) compraramSeaBox.add(v.customerConexaId);
+    }
+  }
+
   for (const [id, lista] of porCliente) {
-    const temCota = lista.some((c) => {
-      const p = c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined;
-      return p?.horasInclusasMes != null || Array.isArray(c.hourPlanQuotaRaw);
-    });
+    // ⚠ A MESMA função da ficha. A versão anterior contava um array VAZIO em
+    // `hourPlanQuotaRaw` como cota — e a regra 4 sumia do Radar para um
+    // cliente que a ficha dizia não ter cota.
+    const temCota = lista.some(
+      (c) =>
+        concessaoDoContrato(c, c.planConexaId !== null ? planoPor.get(c.planConexaId) : undefined)
+          .concedido !== null,
+    );
 
     // ── MARCO_CONTRATO ────────────────────────────────────────────────────
     for (const g of porFamilia("MARCO_CONTRATO")) {
@@ -518,6 +577,11 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     }
 
     // ── PRIMEIRO_EVENTO ───────────────────────────────────────────────────
+    //
+    // ⚠ A mesma leitura da ficha: quem já tem SeaBox (por compra ou por
+    // contrato) não recebe a oferta; quem não comprou é AMBIGUO, porque pode ter
+    // recebido de cortesia — e esse mapeamento não existe na API. A fila
+    // oferecia SeaBox a todo estreante.
     for (const g of porFamilia("PRIMEIRO_EVENTO")) {
       const p = lerParams("PRIMEIRO_EVENTO", g.params).params;
       const primeira = primeiraPor.get(id) ?? null;
@@ -526,7 +590,12 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
         primeira >= keyToUtcDate(p.desde) &&
         marcoAtingido({ inicio: primeira, meses: 0, hoje, toleranciaDias: p.toleranciaDias })
       ) {
-        add(id, g, "estreou agora", g.peso);
+        const temSeaBox =
+          lista.some((c) => {
+            const cat = categoriaDo(c.planConexaId);
+            return segmentos.ehSeaBox(cat.id, cat.nome);
+          }) || compraramSeaBox.has(id);
+        if (!temSeaBox) add(id, g, "estreou agora", g.peso, "AMBIGUO");
       }
     }
 
@@ -568,20 +637,23 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
           mesesDeBase: p.mesesDeBase,
           limiarPct: p.limiarPct,
           mesEmCurso: emCursoPor.get(id) ?? null,
+          baseMinima: p.baseMinima,
         });
         if (r.disparou && r.variacaoPct !== null) {
           add(
             id,
             g,
-            `${r.variacaoPct.toFixed(1).replace(".", ",")}% por ${r.avaliados.length} meses`,
-            g.peso + Math.abs(r.variacaoPct),
+            `${r.variacaoPct.toFixed(1).replace(".", ",")}% por ${r.avaliados.length} meses (base ${fmtBRL(r.base)}/mês)`,
+            pesoPorValor(g.peso, Number(r.perdaPorMes ?? 0)),
           );
         }
         continue;
       }
       if (p.modo === "quedas_seguidas") {
         const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas, quedaMinimaPct: p.quedaMinimaPct });
-        if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5);
+        // AMBIGUO, como na ficha: avaliado sobre RECEITA, e falta definir se
+        // "comprou 20h" é compra ou consumo.
+        if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5, "AMBIGUO");
         continue;
       }
       // Contra a MEDIANA dos meses anteriores, não contra o mês anterior —
@@ -603,17 +675,25 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     for (const g of gatilhosDeContrato) {
       const p = lerParams("MUDANCA_CONTRATO", g.params).params;
       const r = mudancaDeContrato({ contratos: contratosDoCliente, hoje, janelaDias: p.janelaDias, limiarPct: p.limiarPct });
+      const dia = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join("/");
       if (p.modo === "perdeu" && r.perdeu) {
-        const quando = r.encerrado!.endDate!.toISOString().slice(0, 10).split("-").reverse().join("/");
-        add(id, g, `saiu em ${quando}, tinha ${fmtBRL(r.antes)}/mês`, g.peso + Math.min(50, Number(r.antes ?? 0) / 20));
+        add(
+          id,
+          g,
+          `saiu em ${dia(r.encerrado!.endDate!)}, tinha ${fmtBRL(r.antes)}/mês`,
+          pesoPorValor(g.peso, Number(r.antes ?? 0)),
+        );
       }
       if (p.modo === "reduziu" && r.reduziu) {
         add(
           id,
           g,
           `${fmtBRL(r.antes)} → ${fmtBRL(r.agora)}/mês (${r.variacaoPct!.toFixed(0)}%)`,
-          g.peso + Math.abs(r.variacaoPct!) / 2,
+          pesoPorValor(g.peso, Number(r.antes ?? 0) - Number(r.agora ?? 0)),
         );
+      }
+      if (p.modo === "concluiu" && r.concluiu) {
+        add(id, g, `concluiu em ${dia(r.programaEncerrado!.endDate!)}`, g.peso);
       }
     }
   };
@@ -685,7 +765,16 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       segmentos: perfil?.segmentos ?? [],
     });
   }
-  for (const c of clientes.values()) c.sinais.sort((a, b) => b.peso - a.peso);
+  // Dentro do cliente, ATIVO antes de AMBIGUO. E quem só tem sinal ambíguo
+  // desce na fila: "o sistema não sabe afirmar" não pode competir de igual com
+  // "o sistema afirma".
+  const ordem = (a: ItemDaFila, b: ItemDaFila) =>
+    (a.estado === b.estado ? 0 : a.estado === "ATIVO" ? -1 : 1) || b.peso - a.peso;
+  for (const c of clientes.values()) {
+    c.sinais.sort(ordem);
+    const ativos = c.sinais.filter((x) => x.estado === "ATIVO");
+    c.peso = ativos.length ? Math.max(...ativos.map((x) => x.peso)) : Math.max(...c.sinais.map((x) => x.peso)) * 0.7;
+  }
 
   return {
     itens: itens.sort((a, b) => b.peso - a.peso),

@@ -144,8 +144,9 @@ export async function ConfiancaDoCliente({
         </code>
         , e{" "}
         <code className="rounded-sm bg-[var(--superficie-sutil)] px-1 py-px">/packages</code>{" "}
-        responde <strong>404 por permissão</strong> deste token. Não é conferência pendente: é
-        liberação do admin do Conexa. É o que mantém as regras 2 e 9 bloqueadas.
+        responde <strong>404</strong> a este token — e nem o MCP oficial do Conexa, com permissão
+        total, mostra o conteúdo do pacote. Não é conferência pendente: é pergunta para o{" "}
+        <strong>suporte do Conexa</strong>. É o que mantém as regras 2 e 9 bloqueadas.
       </>
     ),
   });

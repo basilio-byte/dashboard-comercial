@@ -57,6 +57,11 @@ export interface MapaDeSegmentos {
   ehSeaBox(conexaId: number | null | undefined, nome: string | null | undefined): boolean;
   /** Unidade física declarada para a categoria, quando houver. */
   unidadeDe(conexaId: number | null | undefined): string | null;
+  /**
+   * A categoria NÃO é de permanência: classificada à mão como PROGRAMA ou
+   * IGNORAR. Contrato dela não conta para "perdeu o contrato" nem "reduziu".
+   */
+  foraDaPermanencia(conexaId: number | null | undefined): boolean;
   /** Quantas categorias têm classificação manual. Para a tela dizer se vale. */
   manuais: number;
 }
@@ -96,6 +101,10 @@ export async function carregarSegmentos(): Promise<MapaDeSegmentos> {
     ehFiscal: (id, nome) => de(id, nome) === "ENDERECO_FISCAL",
     ehSeaBox: (id, nome) => de(id, nome) === "SEABOX",
     unidadeDe: (id) => (id != null ? porId.get(id)?.unidade ?? null : null),
+    foraDaPermanencia: (id) => {
+      const seg = id != null ? porId.get(id)?.segmento : undefined;
+      return seg === "PROGRAMA" || seg === "IGNORAR";
+    },
     manuais: manuais.length,
   };
 }
@@ -148,6 +157,7 @@ export const SEGMENTOS: SegmentoCategoria[] = [
   "SEABOX",
   "DEPOSITO",
   "SERVICOS_DE_ESPACO",
+  "PROGRAMA",
   "OUTRO",
   "IGNORAR",
 ];
@@ -158,6 +168,7 @@ export const ROTULO_SEGMENTO: Record<SegmentoCategoria, string> = {
   SEABOX: "SeaBox",
   DEPOSITO: "depósito",
   SERVICOS_DE_ESPACO: "serviços de espaço",
+  PROGRAMA: "programa (com fim)",
   OUTRO: "outro",
   IGNORAR: "ignorar",
 };
@@ -169,8 +180,9 @@ export const REGRAS_DO_SEGMENTO: Record<SegmentoCategoria, string> = {
   SEABOX: "supressão das regras 5 e 7",
   DEPOSITO: "nenhuma regra hoje",
   SERVICOS_DE_ESPACO: "nenhuma regra hoje",
+  PROGRAMA: "\"concluiu o programa\" — e sai do \"perdeu o contrato\"",
   OUTRO: "nenhuma regra hoje",
-  IGNORAR: "nenhuma — classificada como fora do escopo",
+  IGNORAR: "nenhuma — fora do escopo, inclusive dos sinais de saída",
 };
 
 // ---------------------------------------------------------------------------

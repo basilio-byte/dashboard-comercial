@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * O saldo do pacote vive atrás de um 404 de permissão. Um filtro que aceitasse
  * o campo teria de inventar o número ou devolver lista vazia; as duas coisas
  * mentem, e a segunda mente em silêncio. Aparecer como lacuna declarada é o que
- * faz alguém pedir a liberação ao admin do Conexa em vez de esperar para sempre.
+ * faz alguém levar a pergunta ao Conexa em vez de esperar para sempre.
  */
 export default async function Carteira({
   searchParams,
@@ -45,6 +45,7 @@ export default async function Carteira({
   const filtro: FiltroCarteira = {
     busca: sp.q,
     segmentos: sp.segmento ? [sp.segmento] : undefined,
+    segmentoClassificado: (sp.seg as FiltroCarteira["segmentoClassificado"]) || undefined,
     unidade: sp.unidade || undefined,
     planoConexaId: num(sp.plano),
     categoriaConexaId: num(sp.categoria),
@@ -130,7 +131,9 @@ export default async function Carteira({
                 <thead>
                   <tr>
                     <th>Cliente</th>
-                    <th>Segmento</th>
+                    {/* "Categoria", não "Segmento": são os NOMES de categoria do
+                        Conexa. Segmento é a classificação da tela Gatilhos. */}
+                    <th>Categoria</th>
                     <th className="text-right">Horas/mês</th>
                     <th className="text-right">Receita no ano</th>
                     <th className="text-right">{rotuloMes(resultado.mesDaVariacao)}</th>

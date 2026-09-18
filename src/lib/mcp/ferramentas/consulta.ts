@@ -9,6 +9,7 @@ import { filaDeSinais } from "@/lib/regras/fila";
 import { lerCategorias } from "@/lib/regras/segmentos";
 import { ultimosMesesFechados, ultimoMesFechado } from "@/lib/dates";
 import { FAMILIAS } from "@/lib/regras/catalogo";
+import { SEGMENTOS } from "@/lib/regras/segmentos";
 
 /**
  * FERRAMENTAS DE LEITURA — o que o agente pode perguntar ao painel.
@@ -73,7 +74,14 @@ export const ferramentasDeConsulta = [
       "'horasInclusasMes: null' significa plano SEM horas inclusas (Litoral), e não zero hora.",
     entrada: z.object({
       busca: z.string().optional().describe("nome, nome fantasia ou documento"),
-      segmentos: z.array(z.string()).optional(),
+      segmentos: z
+        .array(z.string())
+        .optional()
+        .describe("NOMES de categoria do Conexa, como aparecem no perfil (ex.: 'Endereço Fiscal - RN')"),
+      segmentoClassificado: z
+        .enum(SEGMENTOS as [string, ...string[]])
+        .optional()
+        .describe("segmento CLASSIFICADO na tela Gatilhos (SALA_PRIVATIVA, DEPOSITO...) — o que o Diego define"),
       unidade: z.string().optional().describe("unidade física, das categorias classificadas"),
       planoConexaId: z.number().int().optional(),
       categoriaConexaId: z.number().int().optional(),
@@ -92,7 +100,7 @@ export const ferramentasDeConsulta = [
       offset: z.number().int().min(0).default(0),
     }),
     somenteLeitura: true,
-    executar: async (a) => buscarCarteira(a),
+    executar: async (a) => buscarCarteira(a as Parameters<typeof buscarCarteira>[0]),
   }),
 
   ferramenta({
@@ -196,7 +204,9 @@ export const ferramentasDeConsulta = [
         customerConexaId: a.customerConexaId,
         sinais,
         resumo: {
-          ativos: sinais.filter((s) => s.estado === "ATIVO").length,
+          // O freio não é oportunidade — mesma conta que a tela faz.
+          ativos: sinais.filter((s) => s.estado === "ATIVO" && s.familia !== "SAUDE_FINANCEIRA").length,
+          freioAcionado: sinais.some((s) => s.familia === "SAUDE_FINANCEIRA" && s.estado === "ATIVO"),
           ambiguos: sinais.filter((s) => s.estado === "AMBIGUO").length,
           indisponiveis: sinais.filter((s) => s.estado === "DADO_INDISPONIVEL").length,
           desligados: sinais.filter((s) => s.desligado).length,
@@ -433,4 +443,116 @@ export const ferramentasDeConsulta = [
       return { contatos, total: contatos.length };
     },
   }),
+
+  ferramenta({
+    nome: "conferir_consistencia",
+    titulo: "Conferir Radar × ficha",
+    descricao:
+      "Confere se o Radar e a ficha do cliente dizem a MESMA coisa. Para cada cliente da fila, abre a " +
+      "ficha e compara regra a regra (ATIVO com ATIVO, AMBIGUO com AMBIGUO); depois sorteia clientes " +
+      "elegíveis FORA da fila e confere que a ficha deles não tem sinal que o Radar esconde. " +
+      "Rode depois de qualquer mudança no motor de regras. Lento de propósito: abre uma ficha por " +
+      "cliente conferido. Não consome a API do Conexa.",
+    entrada: z.object({
+      maxClientesDaFila: z.number().int().min(1).max(200).default(60),
+      amostraForaDaFila: z.number().int().min(0).max(100).default(20),
+    }),
+    somenteLeitura: true,
+    executar: async (a) => {
+      /**
+       * ⚠ Diferença CONHECIDA, e não divergência: o excedente AMBIGUO. A ficha
+       * marca "ambíguo" todo cliente com mais de um contrato com cota — mesmo
+       * que ele não estoure nada — porque não dá para saber de qual balde a
+       * hora saiu. Isso é "não sei avaliar", não oportunidade, e por isso a
+       * fila deixa de fora (e conta em `ambiguos`).
+       */
+      const conhecida = (familia: string, estado: string) => familia === "EXCEDENTE" && estado === "AMBIGUO";
+      const ehSinal = (estado: string) => estado === "ATIVO" || estado === "AMBIGUO";
+
+      const fila = await filaDeSinais();
+      const divergencias: Array<{
+        customerConexaId: number;
+        nome: string | null;
+        regra: string;
+        noRadar: string;
+        naFicha: string;
+        motivoNaFicha: string | null;
+      }> = [];
+
+      const daFila = fila.clientes.slice(0, a.maxClientesDaFila);
+      for (const c of daFila) {
+        const sinais = await sinaisDoCliente(c.customerConexaId);
+        const porRegra = new Map(sinais.map((s) => [s.regra, s]));
+        for (const item of c.sinais) {
+          const s = porRegra.get(item.regra);
+          if (!s || s.estado !== item.estado) {
+            divergencias.push({
+              customerConexaId: c.customerConexaId,
+              nome: c.nome,
+              regra: item.regra,
+              noRadar: item.estado,
+              naFicha: s?.estado ?? "ausente",
+              motivoNaFicha: s?.motivo ?? null,
+            });
+          }
+        }
+        for (const s of sinais) {
+          if (!ehSinal(s.estado) || s.familia === "SAUDE_FINANCEIRA" || conhecida(s.familia, s.estado)) continue;
+          if (!c.sinais.some((i) => i.regra === s.regra)) {
+            divergencias.push({
+              customerConexaId: c.customerConexaId,
+              nome: c.nome,
+              regra: s.regra,
+              noRadar: "ausente",
+              naFicha: s.estado,
+              motivoNaFicha: s.motivo,
+            });
+          }
+        }
+      }
+
+      // Amostra de elegíveis FORA da fila: nenhum sinal pode aparecer na ficha.
+      const naFila = new Set(fila.clientes.map((c) => c.customerConexaId));
+      const candidatos = await prisma.contract.findMany({
+        where: { isActive: true, customerConexaId: { not: null } },
+        select: { customerConexaId: true },
+        distinct: ["customerConexaId"],
+      });
+      const elegiveis = await prisma.customer.findMany({
+        where: {
+          conexaId: { in: candidatos.map((c) => c.customerConexaId!).filter((id) => !naFila.has(id)) },
+          isActive: true,
+          isBlocked: false,
+        },
+        select: { conexaId: true, name: true },
+      });
+      const amostra = elegiveis.sort(() => Math.random() - 0.5).slice(0, a.amostraForaDaFila);
+      for (const c of amostra) {
+        const sinais = await sinaisDoCliente(c.conexaId);
+        for (const s of sinais) {
+          if (!ehSinal(s.estado) || s.familia === "SAUDE_FINANCEIRA" || conhecida(s.familia, s.estado)) continue;
+          divergencias.push({
+            customerConexaId: c.conexaId,
+            nome: c.name,
+            regra: s.regra,
+            noRadar: "ausente",
+            naFicha: s.estado,
+            motivoNaFicha: s.motivo,
+          });
+        }
+      }
+
+      return {
+        consistente: divergencias.length === 0,
+        conferidosNaFila: daFila.length,
+        conferidosForaDaFila: amostra.length,
+        divergencias,
+        diferencasConhecidas: [
+          "excedente AMBIGUO (mais de um contrato com cota) aparece na ficha e fica fora da fila — é 'não sei avaliar', não oportunidade",
+          "oferta de venda suspensa pelo freio aparece como NAO_APLICAVEL na ficha e fora da fila — é a mesma decisão",
+        ],
+      };
+    },
+  }),
+
 ];

@@ -260,7 +260,15 @@ function Linha({ cliente: c }: { cliente: ClienteNaFila }) {
 
       <td className="max-w-lg">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="selo selo-critico">{principal.nomeDaRegra}</span>
+          <span className={cn("selo", principal.estado === "AMBIGUO" ? "selo-atencao" : "selo-critico")}>
+            {principal.nomeDaRegra}
+          </span>
+          {/* Mesmo estado da ficha: "ambíguo" é o sistema recusando afirmar. */}
+          {principal.estado === "AMBIGUO" ? (
+            <span className="selo" title="O sistema não consegue afirmar este sinal — confira na ficha o porquê.">
+              ambíguo
+            </span>
+          ) : null}
           <span className="text-[13px] text-[var(--tinta-2)]">{principal.evidencia}</span>
           {c.sinais.length > 1 ? (
             <span

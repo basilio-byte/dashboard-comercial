@@ -168,7 +168,13 @@ export async function enterrarZumbis(): Promise<number> {
     data: {
       status: "FAILED",
       finishedAt: new Date(),
-      error: "Processo morreu sem encerrar o run (heartbeat vencido).",
+      // ⚠ Quase sempre é um reinício do container — um deploy — no meio da
+      // carga. A mensagem antiga ("processo morreu") aparecia na tela Motor
+      // como falha grave; o que aconteceu é interrupção, e a próxima execução
+      // retoma a janela de onde parou.
+      error:
+        "Interrompida: o processo parou antes de terminar (reinício ou deploy do serviço). " +
+        "A próxima execução retoma a janela de onde parou.",
     },
   });
   return r.count;

@@ -22,6 +22,7 @@ import { cn } from "@/lib/ui";
 
 interface Opcoes {
   segmentos: string[];
+  segmentosClassificados: Array<{ segmento: string; rotulo: string }>;
   unidades: string[];
   planos: Array<{ conexaId: number; nome: string; horasInclusasMes: number | null; contratos: number }>;
   categorias: Array<{ conexaId: number; nome: string }>;
@@ -59,7 +60,7 @@ export function FiltrosDaCarteira({
 
   const v = (k: string) => valores[k] ?? "";
   const ativos = [
-    "q", "segmento", "plano", "categoria", "unidade", "receitaMin", "receitaMax",
+    "q", "segmento", "seg", "plano", "categoria", "unidade", "receitaMin", "receitaMax",
     "horasMin", "horasMax", "semCota", "contrato", "estourou", "dias", "inelegiveis",
   ].filter((k) => v(k)).length;
 
@@ -107,15 +108,16 @@ export function FiltrosDaCarteira({
 
         <label className="block">
           <Rotulo>Segmento</Rotulo>
+          {/* A classificação da tela Gatilhos — a mesma que as regras usam. */}
           <select
-            value={v("segmento")}
+            value={v("seg")}
             className="campo w-44 py-1.5"
-            onChange={(e) => aplicar({ segmento: e.target.value })}
+            onChange={(e) => aplicar({ seg: e.target.value })}
           >
             <option value="">todos</option>
-            {opcoes.segmentos.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {opcoes.segmentosClassificados.map((s) => (
+              <option key={s.segmento} value={s.segmento}>
+                {s.rotulo}
               </option>
             ))}
           </select>
@@ -198,7 +200,7 @@ export function FiltrosDaCarteira({
             className="btn btn-fantasma py-1"
             onClick={() =>
               aplicar({
-                q: null, segmento: null, plano: null, categoria: null, unidade: null,
+                q: null, segmento: null, seg: null, plano: null, categoria: null, unidade: null,
                 receitaMin: null, receitaMax: null, horasMin: null, horasMax: null,
                 semCota: null, contrato: null, estourou: null, dias: null, inelegiveis: null,
               })
@@ -308,8 +310,8 @@ export function FiltrosDaCarteira({
         </div>
       ) : null}
 
-      {/* ⚠ A lacuna aparece, sempre. É o que faz alguém pedir a liberação ao
-          admin do Conexa em vez de procurar um filtro que não pode existir. */}
+      {/* ⚠ A lacuna aparece, sempre. É o que faz alguém levar a pergunta ao
+          Conexa em vez de procurar um filtro que não pode existir. */}
       {lacunas.map((l) => (
         <p key={l} className="mt-3 border-t border-[var(--linha)] pt-2.5 text-[12px] leading-relaxed text-[var(--tinta-3)]">
           <span className="selo selo-atencao mr-1.5">não filtrável</span>

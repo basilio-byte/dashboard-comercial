@@ -129,7 +129,13 @@ export interface OpcoesDeExcedente {
  */
 export type OrigemDaCota = "contrato" | "plano" | null;
 
-function concessaoDoContrato(
+/**
+ * ⚠ Exportada em 2026-09-18 para ser a ÚNICA definição de "este contrato tem
+ * cota de horas". A fila do Radar tinha a sua (`Array.isArray(hourPlanQuotaRaw)`)
+ * e contava um array VAZIO como cota — o mesmo cliente podia ter cota no Radar
+ * e não ter na ficha.
+ */
+export function concessaoDoContrato(
   contrato: { hourPlanQuotaRaw?: unknown },
   plano: { horasInclusasMes?: { toString(): string } | null } | undefined,
 ): { concedido: Money | null; origem: OrigemDaCota } {

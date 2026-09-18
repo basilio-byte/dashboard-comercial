@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { dataHoraLocal } from "@/lib/dates";
 import { carregarGatilhos } from "@/lib/regras/config";
+import { rotuloDaRegra } from "@/lib/regras/catalogo";
 import { listarAgentes } from "@/lib/operacao/agentes";
 import { Painel, Rolante, Secao } from "@/components/Cartao";
 import { FormularioContato, RESULTADO_ESTILO } from "./formulario-contato";
@@ -33,10 +34,10 @@ export async function Contatos({ customerConexaId }: { customerConexaId: number 
    * registraria "sem regra específica" para um sinal que existe — e o histórico
    * perderia justamente a informação que impede a reoferta.
    */
-  const regras = gatilhos.todos.map((g) => ({
-    v: g.codigo,
-    r: `${g.codigo === "extra" || g.codigo === "métrica" ? g.codigo : `regra ${g.codigo}`} · ${g.nome}`,
-  }));
+  // O freio não motiva contato de venda — é o que o suspende.
+  const regras = gatilhos.todos
+    .filter((g) => g.familia !== "SAUDE_FINANCEIRA")
+    .map((g) => ({ v: g.codigo, r: `${rotuloDaRegra(g.codigo)} · ${g.nome}` }));
 
   const ultimo = contatos[0];
 
@@ -108,9 +109,7 @@ export async function Contatos({ customerConexaId }: { customerConexaId: number 
                       <td className="text-[var(--tinta-2)]">
                         {c.regra ? (
                           <span className="selo">
-                            {c.regra === "extra" || c.regra === "métrica"
-                              ? c.regra
-                              : `regra ${c.regra}`}
+                            {rotuloDaRegra(c.regra)}
                           </span>
                         ) : (
                           <span className="text-[var(--tinta-3)]">—</span>

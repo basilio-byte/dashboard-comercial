@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { CODIGOS_NATIVOS, FAMILIAS, FAMILIAS_DE_VENDA, NATIVOS, lerParams, novoCodigo, paramsPorFamilia } from "./catalogo";
+import {
+  CODIGOS_NATIVOS,
+  FAMILIAS,
+  FAMILIAS_DE_VENDA,
+  LACUNA_SALDO_PACOTE,
+  NATIVOS,
+  lerParams,
+  novoCodigo,
+  paramsPorFamilia,
+  pesoPorValor,
+  rotuloDaRegra,
+} from "./catalogo";
 
 /**
  * ⚠ O teste mais importante deste arquivo é o primeiro: os defaults do catálogo
@@ -67,11 +78,12 @@ describe("catálogo de gatilhos", () => {
   });
 
   it("as regras 2 e 9 continuam bloqueadas por permissão, não por configuração", () => {
-    // Se alguém "destravar" isto sem o admin do Conexa liberar `/packages`, a
+    // Se alguém "destravar" isto sem o Conexa expor o conteúdo do pacote, a
     // regra passa a existir na tela e nunca dispara — pior que estar bloqueada.
     for (const c of ["2", "9"]) {
       const n = NATIVOS.find((x) => x.codigo === c)!;
-      expect(n.bloqueio).toMatch(/404/);
+      expect(n.bloqueio).toBe(LACUNA_SALDO_PACOTE);
+      expect(n.bloqueio).toMatch(/suporte/i);
     }
   });
 
@@ -95,5 +107,24 @@ describe("catálogo de gatilhos", () => {
     // A métrica virou queda sustentada — a versão de mês isolado não volta.
     const metrica = NATIVOS.find((n) => n.codigo === "métrica")!;
     expect(metrica.params.modo).toBe("queda_sustentada");
+  });
+
+  it("rótulo de regra: número vira 'regra N', o resto fica como está", () => {
+    expect(rotuloDaRegra("4")).toBe("regra 4");
+    expect(rotuloDaRegra("10")).toBe("regra 10");
+    expect(rotuloDaRegra("contrato-perdido")).toBe("contrato-perdido");
+    expect(rotuloDaRegra("métrica")).toBe("métrica");
+  });
+
+  it("peso pelo dinheiro: R$ 24 não passa na frente de R$ 1.280, e há teto", () => {
+    expect(pesoPorValor(40, 24)).toBeLessThan(pesoPorValor(40, 1280));
+    expect(pesoPorValor(40, 1_000_000)).toBe(100);
+    expect(pesoPorValor(40, -50)).toBe(40);
+  });
+
+  it("o programa concluído existe como nativo, e a métrica exige base mínima", () => {
+    expect(CODIGOS_NATIVOS.has("programa-concluido")).toBe(true);
+    const metrica = NATIVOS.find((n) => n.codigo === "métrica")!;
+    expect(metrica.params.baseMinima).toBe(50);
   });
 });

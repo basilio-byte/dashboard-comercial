@@ -3,6 +3,7 @@ import { useState, useTransition } from "react";
 import { ChevronDown, Loader, Plus, RotateCcw, Trash2 } from "lucide-react";
 import type { JsonSchema } from "@/lib/mcp/esquema";
 import type { GatilhoResolvido } from "@/lib/regras/config";
+import { rotuloDaRegra } from "@/lib/regras/catalogo";
 import {
   acaoAlternarGatilho,
   acaoCriarGatilho,
@@ -121,7 +122,7 @@ export function EditorDeGatilhos({
                         {g.nome}
                       </span>
                       <span className="selo num">
-                        {g.codigo === "extra" || g.codigo === "métrica" ? g.codigo : `regra ${g.codigo}`}
+                        {rotuloDaRegra(g.codigo)}
                       </span>
                       <span className="selo">{g.familia.toLowerCase().replace(/_/g, " ")}</span>
                       {g.bloqueio ? (

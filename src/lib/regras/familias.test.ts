@@ -11,6 +11,7 @@ import {
   quedaMesAMes,
   quedaPercentual,
   quedaSustentada,
+  mediaAparada,
   ehHoraAvulsa,
   mudancaDeContrato,
   situacaoFinanceira,
@@ -548,5 +549,95 @@ describe("SAUDE_FINANCEIRA — o freio", () => {
 
   it("cobrança paga não freia, mesmo antiga", () => {
     expect(situacaoFinanceira({ cobrancas: [c("paid", "2026-08-01")], ...params }).freiar).toBe(false);
+  });
+});
+
+describe("queda sustentada — a base robusta (2026-09-18, depois do deploy)", () => {
+  it("⚠ troca de ritmo de cobrança não é queda: bimestral de 180 virou mensal de 90", () => {
+    // O caso real (Plenitus): paga os mesmos R$ 90/mês; a mediana sozinha dava −33%.
+    const s = serie(
+      ["2026-01", 180], ["2026-02", 0], ["2026-03", 180], ["2026-04", 0],
+      ["2026-05", 180], ["2026-06", 90], ["2026-07", 90], ["2026-08", 90],
+    );
+    expect(quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 }).disparou).toBe(false);
+  });
+
+  it("⚠ base pequena demais não vira −100% no topo do Radar", () => {
+    // O caso real (Simplifica): anual, com avulsos esporádicos — base de R$ 18/mês.
+    const s = serie(
+      ["2026-01", 98], ["2026-02", 0], ["2026-03", 36], ["2026-04", 0],
+      ["2026-05", 2066], ["2026-06", 0], ["2026-07", 0], ["2026-08", 0],
+    );
+    const r = quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30, baseMinima: 50 });
+    expect(r.disparou).toBe(false);
+    expect(r.semBase).toBe("BASE_PEQUENA");
+  });
+
+  it("dois picos na base não inflam o normal — a mediana segura", () => {
+    const s = serie(
+      ["2026-01", 100], ["2026-02", 100], ["2026-03", 300], ["2026-04", 100],
+      ["2026-05", 300], ["2026-06", 100], ["2026-07", 100], ["2026-08", 100],
+    );
+    expect(quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 }).disparou).toBe(false);
+  });
+
+  it("queda real de contrato grande continua disparando, e informa a perda por mês", () => {
+    // O caso real (Climb): R$ 3.000/mês para R$ 119.
+    const s = serie(
+      ["2026-01", 3000], ["2026-02", 3000], ["2026-03", 3064], ["2026-04", 3035],
+      ["2026-05", 3063], ["2026-06", 119], ["2026-07", 123], ["2026-08", 119],
+    );
+    const r = quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30, baseMinima: 50 });
+    expect(r.disparou).toBe(true);
+    expect(r.perdaPorMes!.toNumber()).toBeGreaterThan(2800);
+  });
+
+  it("média aparada tira o menor e o maior", () => {
+    expect(mediaAparada([money(0), money(100), money(100), money(1000)])!.toNumber()).toBe(100);
+  });
+});
+
+describe("MUDANCA_CONTRATO — programa não é permanência (2026-09-18)", () => {
+  const hoje = d("2026-09-18");
+  const k = (
+    conexaId: number, valor: number, inicio: string, fim: string | null, ativo: boolean,
+    freq = "Monthly", foraDaPermanencia = false,
+  ): ContratoParaValor => ({
+    conexaId, amount: money(valor), paymentFrequency: freq,
+    startDate: d(inicio), endDate: fim ? d(fim) : null, isActive: ativo, foraDaPermanencia,
+  });
+
+  it("⚠ egressa do Hub CONCLUIU — não perdeu o contrato", () => {
+    // O caso real: 8 dos 23 "perdeu o contrato" eram a turma que terminou em 17/08.
+    const r = mudancaDeContrato({
+      contratos: [k(11646, 279.9, "2026-04-28", "2026-08-17", false, "Yearly", true)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.perdeu).toBe(false);
+    expect(r.concluiu).toBe(true);
+    expect(r.programaEncerrado!.conexaId).toBe(11646);
+  });
+
+  it("concluiu o programa mas já tem permanência: não é sinal de continuidade", () => {
+    const r = mudancaDeContrato({
+      contratos: [
+        k(1, 279.9, "2026-04-28", "2026-08-17", false, "Yearly", true),
+        k(2, 119, "2026-06-01", null, true),
+      ],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.concluiu).toBe(false);
+    expect(r.perdeu).toBe(false);
+  });
+
+  it("programa terminando não conta como redução de quem tem outro contrato", () => {
+    const r = mudancaDeContrato({
+      contratos: [
+        k(1, 1200, "2026-01-01", "2026-09-01", false, "Monthly", true),
+        k(2, 119, "2025-01-01", null, true),
+      ],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.reduziu).toBe(false);
   });
 });

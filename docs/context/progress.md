@@ -4,6 +4,51 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, fim — Auditoria de consistência do sistema inteiro
+
+Pedido do dono: *"analise todo o sistema, veja se tudo está consistente e aplique
+as melhorias necessárias"*. Medido primeiro, contra a produção e contra o código.
+
+**Radar × ficha divergiam, de novo.** GH Engenharia aparecia no Radar pela
+regra 3 enquanto a ficha dela dizia AMBÍGUO. A fila não tinha estado; a regra 5
+na fila ofereceria SeaBox a quem já tem; e a fila tinha a própria definição de
+"tem cota" (`Array.isArray`, que conta array vazio). Agora o item da fila tem
+estado, as duas leituras usam as mesmas funções, e a paridade virou ferramenta:
+`conferir_consistencia` (ADR-0013).
+
+**Métrica — os dois últimos erros.** Base = a menor entre mediana e média
+aparada (a mediana aguenta pico, a aparada aguenta troca de ritmo de cobrança —
+Plenitus passou de bimestral a mensal pagando o mesmo), e base mínima de R$ 50
+(Simplifica tinha base de R$ 18 e aparecia em 2º no Radar com "−100%").
+
+**Peso pelo dinheiro em jogo** nos sinais de saída — +1 a cada R$ 25/mês, teto
+de +60. A porcentagem punha R$ 18 ao lado de R$ 2.000.
+
+**Programa não é permanência.** Segmento novo, PROGRAMA: contrato dessa
+categoria não conta para "perdeu o contrato", e o fim dele vira o gatilho
+`programa-concluido` — oferecer continuidade. 8 dos 23 "perdeu o contrato" eram
+a turma do Hub Empreendedoras (categoria #22), que terminou junta em 17/08.
+Classificar a categoria como PROGRAMA é passo de configuração, depois do deploy.
+
+**Textos que tinham ficado para trás.** A lacuna do saldo do pacote estava
+escrita em nove lugares; metade dizia "admin do Conexa" e a pergunta agora é do
+suporte. Virou uma constante (`LACUNA_SALDO_PACOTE`). O rótulo "regra N" era
+montado à mão em três telas. O filtro "Segmento" da Carteira lia nomes de
+categoria, e a classificação do Diego não mudava nada nele — agora lê a
+classificação. A coluna virou "Categoria", que é o que ela mostra.
+
+**Carga "falhou" era deploy.** As incrementais das 14:30 e 15:30 foram
+interrompidas por reinício do container. A mensagem dizia "processo morreu";
+agora diz "interrompida por reinício ou deploy, retoma de onde parou".
+
+**Instruções do MCP** ganharam as armadilhas em que eu mesmo caí hoje — `notBilled`
+não é "não cobrada", mês isolado engana, `deductedFromQuota` prova cota.
+
+216 testes (eram 205). Migration aditiva: um valor novo no enum
+`SegmentoCategoria`.
+
+---
+
 ## 2026-09-18, noite — Tokens por pessoa, sinais de saída e o freio de cobrança
 
 Decisões do dono no fim do dia, depois da medição da tarde.

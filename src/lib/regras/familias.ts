@@ -137,6 +137,22 @@ export function quedaPercentual(p: {
   return { disparou: variacao <= -Math.abs(p.limiarPct), variacaoPct: variacao };
 }
 
+/**
+ * Média APARADA: tira o menor e o maior e tira a média do resto.
+ *
+ * Complementa a mediana. A mediana aguenta um pico isolado mas se engana com
+ * troca de RITMO de cobrança — 180, 0, 180, 0 (bimestral) dá mediana 90 ou 180
+ * conforme a janela, e o cliente paga os mesmos R$ 90/mês. A média aparada lê
+ * esse caso certo e se engana com dois picos. Usadas juntas (ver
+ * `quedaSustentada`), uma cobre o ponto cego da outra.
+ */
+export function mediaAparada(valores: Money[]): Money | null {
+  if (!valores.length) return null;
+  const ord = [...valores].sort((a, b) => a.comparedTo(b));
+  const miolo = ord.length >= 4 ? ord.slice(1, -1) : ord;
+  return miolo.reduce((acc, v) => acc.plus(v), money(0)).div(miolo.length);
+}
+
 /** Mediana de valores monetários. Lista vazia devolve `null`, nunca zero. */
 export function mediana(valores: Money[]): Money | null {
   if (!valores.length) return null;
@@ -472,13 +488,17 @@ export function quedaSustentada(p: {
   limiarPct: number;
   /** Receita do mês em curso até agora. `null` = não informado. */
   mesEmCurso?: Money | null;
+  /** Abaixo desta base (R$/mês) não se fala em queda. */
+  baseMinima?: number;
 }): {
   disparou: boolean;
   variacaoPct: number | null;
   base: Money | null;
   avaliados: string[];
-  semBase: "SERIE_CURTA" | "BASE_ZERO" | null;
+  semBase: "SERIE_CURTA" | "BASE_ZERO" | "BASE_PEQUENA" | null;
   desmentidoPeloMesEmCurso: boolean;
+  /** Quanto se perdeu por mês em relação à base — para ordenar a fila. */
+  perdaPorMes: Money | null;
 } {
   const serie = [...p.serie].sort((a, b) => a.mesKey.localeCompare(b.mesKey));
   const nAval = Math.max(1, p.mesesAvaliados);
@@ -490,13 +510,24 @@ export function quedaSustentada(p: {
     base: null,
     avaliados: [] as string[],
     desmentidoPeloMesEmCurso: false,
+    perdaPorMes: null,
   };
   if (serie.length < nAval + 3) return { ...nulo, semBase: "SERIE_CURTA" };
 
   const avaliados = serie.slice(-nAval);
-  const base = mediana(serie.slice(-(nAval + nBase), -nAval).map((x) => x.valor))!;
+  const valoresDaBase = serie.slice(-(nAval + nBase), -nAval).map((x) => x.valor);
+  // ⚠ A MENOR das duas leituras robustas do normal. Só é queda o que cai
+  // abaixo das duas — a mediana aguenta pico isolado, a média aparada aguenta
+  // troca de ritmo de cobrança (medido: Plenitus passou de bimestral a mensal,
+  // pagando o mesmo, e a mediana sozinha acusava −33%).
+  const med = mediana(valoresDaBase)!;
+  const apar = mediaAparada(valoresDaBase)!;
+  const base = med.lessThan(apar) ? med : apar;
   const meses = avaliados.map((a) => a.mesKey);
   if (base.lessThanOrEqualTo(0)) return { ...nulo, avaliados: meses, base, semBase: "BASE_ZERO" };
+  if (p.baseMinima !== undefined && base.lessThan(p.baseMinima)) {
+    return { ...nulo, avaliados: meses, base, semBase: "BASE_PEQUENA" };
+  }
 
   const teto = base.times(1 - Math.abs(p.limiarPct) / 100);
   const media = avaliados
@@ -513,6 +544,7 @@ export function quedaSustentada(p: {
     avaliados: meses,
     semBase: null,
     desmentidoPeloMesEmCurso: todosAbaixo && desmentido,
+    perdaPorMes: base.minus(media),
   };
 }
 
@@ -527,6 +559,11 @@ export interface ContratoParaValor {
   startDate: Date | null;
   endDate: Date | null;
   isActive: boolean;
+  /**
+   * Contrato de categoria PROGRAMA (ou IGNORAR): não conta como permanência.
+   * O fim dele é conclusão, não saída — ver o modo `concluiu`.
+   */
+  foraDaPermanencia?: boolean;
 }
 
 const MESES_DA_PERIODICIDADE: Record<string, number> = {
@@ -583,21 +620,31 @@ export function mudancaDeContrato(p: {
 }): {
   perdeu: boolean;
   reduziu: boolean;
+  /** Um contrato de PROGRAMA terminou na janela e não há permanência vigente. */
+  concluiu: boolean;
   antes: Money | null;
   agora: Money | null;
   variacaoPct: number | null;
-  /** O contrato que terminou dentro da janela, quando há. */
+  /** O contrato de permanência que terminou dentro da janela, quando há. */
   encerrado: ContratoParaValor | null;
+  /** O contrato de programa que terminou dentro da janela, quando há. */
+  programaEncerrado: ContratoParaValor | null;
 } {
   const desde = new Date(p.hoje);
   desde.setUTCDate(desde.getUTCDate() - p.janelaDias);
 
-  const antes = valorContratadoEm(p.contratos, desde);
-  const agora = valorContratadoEm(p.contratos, p.hoje);
-  const encerrado =
-    p.contratos
-      .filter((c) => c.endDate && c.endDate > desde && c.endDate <= p.hoje)
-      .sort((a, b) => b.endDate!.getTime() - a.endDate!.getTime())[0] ?? null;
+  // ⚠ Programa não é permanência: o fim da turma do Hub Empreendedoras não pode
+  // aparecer como "perdeu o contrato" (8 de 23 eram isso, em 2026-09-18).
+  const permanencia = p.contratos.filter((c) => !c.foraDaPermanencia);
+  const programas = p.contratos.filter((c) => c.foraDaPermanencia);
+
+  const antes = valorContratadoEm(permanencia, desde);
+  const agora = valorContratadoEm(permanencia, p.hoje);
+  const terminouNaJanela = (c: ContratoParaValor) => !!c.endDate && c.endDate > desde && c.endDate <= p.hoje;
+  const maisRecente = (l: ContratoParaValor[]) =>
+    l.filter(terminouNaJanela).sort((a, b) => b.endDate!.getTime() - a.endDate!.getTime())[0] ?? null;
+  const encerrado = maisRecente(permanencia);
+  const programaEncerrado = maisRecente(programas);
 
   const temAntes = !!antes && antes.greaterThan(0);
   const temAgora = !!agora && agora.greaterThan(0);
@@ -610,10 +657,12 @@ export function mudancaDeContrato(p: {
     perdeu: temAntes && !temAgora && !!encerrado,
     reduziu:
       temAntes && temAgora && variacaoPct !== null && variacaoPct <= -Math.abs(p.limiarPct),
+    concluiu: !!programaEncerrado && !temAgora,
     antes,
     agora,
     variacaoPct,
     encerrado,
+    programaEncerrado,
   };
 }
 
