@@ -8,6 +8,7 @@ import { sinaisDoCliente } from "@/lib/regras/avaliar";
 import { filaDeSinais } from "@/lib/regras/fila";
 import { lerCategorias } from "@/lib/regras/segmentos";
 import { ultimosMesesFechados, ultimoMesFechado } from "@/lib/dates";
+import { FAMILIAS } from "@/lib/regras/catalogo";
 
 /**
  * FERRAMENTAS DE LEITURA — o que o agente pode perguntar ao painel.
@@ -211,12 +212,13 @@ export const ferramentasDeConsulta = [
       "A fila de quem procurar hoje: todos os gatilhos ligados avaliados em LOTE sobre a base " +
       "elegível inteira, agrupados por cliente. É o que a tela Radar mostra. " +
       "Leia `bloqueadas` e `desligadas` antes de concluir qualquer coisa de uma fila curta: " +
-      "fila vazia com gatilhos bloqueados não significa 'ninguém tem oportunidade'.",
+      "fila vazia com gatilhos bloqueados não significa 'ninguém tem oportunidade'. " +
+      "`suspensosPeloFreio` conta ofertas de VENDA seguradas porque o cliente está com cobrança " +
+      "vencida ou renegociada — o freio não suspende os sinais de saída.",
     entrada: z.object({
       regras: z.array(z.string()).optional().describe('filtra por código de gatilho, ex.: ["4","8"]'),
-      familia: z
-        .enum(["MARCO_CONTRATO", "TENDENCIA", "USO_SEM_COTA", "PRIMEIRO_EVENTO", "EVENTO_EM_SEGMENTO", "EXCEDENTE", "SALDO_COTA"])
-        .optional(),
+      // Do catálogo, não escrito aqui: família nova não pode ficar invisível ao MCP.
+      familia: z.enum(FAMILIAS as [string, ...string[]]).optional(),
       semContatoHaDias: z
         .number()
         .int()
@@ -260,6 +262,8 @@ export const ferramentasDeConsulta = [
         porRegra: fila.porRegra,
         bloqueadas: fila.bloqueadas,
         desligadas: fila.desligadas,
+        suspensosPeloFreio: fila.suspensosPeloFreio,
+        semContratoAnalisados: fila.semContratoAnalisados,
       };
     },
   }),

@@ -4,6 +4,61 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, noite — Tokens por pessoa, sinais de saída e o freio de cobrança
+
+Decisões do dono no fim do dia, depois da medição da tarde.
+
+**Tokens do MCP por pessoa.** O token único do `.env` não dizia quem fez: todo
+o rastro saía como "mcp:claude-code", um rótulo que o cliente declara e que não
+prova nada. Agora cada pessoa cria os seus em **Minha conta**, com escopo de
+leitura ou de escrita, e o rastro diz `diego@… via MCP`. O token é mostrado uma
+vez; o banco guarda só o SHA-256. A pessoa é conferida a cada chamada — desativar
+o usuário derruba os tokens na hora. O `MCP_TOKEN` do ambiente continua valendo
+como **master**, para desenvolvimento, a pedido do dono.
+
+**Três sinais de saída, porque cobrem momentos diferentes:**
+
+- **Perdeu o contrato** (`contrato-perdido`) — o último contrato terminou e o
+  cliente ficou sem nenhum. É fato, não inferência: 29 clientes em 45 dias
+  quando medido, 28 ainda ativos no Conexa. Tem população própria na fila: quem
+  perdeu o contrato já não está na base elegível, que é "com contrato vigente".
+- **Contrato reduzido** (`contrato-reduzido`) — o valor MENSAL contratado caiu
+  20% ou mais em 45 dias. O sinal mais limpo medido: das 6 trocas de contrato,
+  4 eram reduções reais — entre elas as duas maiores quedas que a métrica tinha
+  achado (R$ 2.000 → R$ 119, R$ 1.900 → R$ 99,90) — e as 2 renovações pelo
+  mesmo valor não disparam. Contrato anual entra pelo valor mensal.
+- **Queda sustentada** — a métrica, na terceira versão. Dois meses fechados
+  SEGUIDOS abaixo de 70% da mediana dos 6 anteriores. Um mês isolado não basta
+  mais: no regime de emissão ele vem zerado por renegociação, dobrado por
+  calendário, ou deslocado pela fatura do mês seguinte. O mês em curso só
+  DESMENTE — foi o caso dos que renegociaram e pagaram tudo em setembro —, nunca
+  cria queda. Quem renegociou no período é AMBÍGUO, não queda.
+
+**O freio de cobrança** (`freio`, família SAUDE_FINANCEIRA). Cobrança vencida
+há 15–105 dias, ou renegociada nos últimos 90, SUSPENDE as ofertas de venda
+(marcos, pacote, primeira reserva, excedente). Não suspende os sinais de saída —
+com quem está saindo a conversa acontece mesmo com dívida. Na ficha, a regra que
+dispararia aparece como "dispararia, e está suspensa pelo freio", para o
+vendedor saber por que a oferta sumiu. O Radar conta as ofertas suspensas. O
+teto de 105 dias é de propósito: dívida de dois anos é outra conversa, e não
+pode travar para sempre um cliente que segue pagando.
+
+**O excedente corrigido.** A hora que passa da cota também chega `notBilled`
+desde a fatura do mês seguinte — 219h em agosto contra 119h que o excedente
+enxergava. `faturada()` agora conta `notBilled` com venda de valor. Carrega a
+venda só das reservas `notBilled`, que são as únicas em que o valor muda algo.
+
+Migration aditiva (`tokens_mcp`, `EscopoToken`, e dois valores novos no enum
+`FamiliaRegra`) — conferido antes que a produção roda PostgreSQL 17, porque dois
+valores de enum na mesma migration quebram em PostgreSQL 11 ou anterior, e
+quebrar ali impediria o container de subir.
+
+205 testes (eram 174). Rodado contra o banco local: fila, as 5 fichas, token
+de leitura recusando escrita, token de escrita gravando o e-mail da pessoa,
+revogado e inventado recebendo 401, master gravando como `mcp:master`.
+
+---
+
 ## 2026-09-18, tarde — Medido depois do deploy, e uma correção da correção
 
 Deploy de `256807b` confirmado pelos parâmetros novos em `gatilhos_listar`.

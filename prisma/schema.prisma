@@ -42,6 +42,7 @@ model User {
 
   sessions    Session[]
   loginEvents LoginEvent[]
+  tokensMcp   TokenMcp[]
 
   @@map("users")
 }
@@ -655,6 +656,8 @@ enum FamiliaRegra {
   EVENTO_EM_SEGMENTO /// Fiscal sem cota que reservou sala — regra 10
   EXCEDENTE /// estoura a cota de horas com recorrência — o "extra"
   SALDO_COTA /// saldo do pacote — regras 2 e 9, bloqueadas por permissão
+  MUDANCA_CONTRATO /// perdeu o contrato, ou trocou por um de valor menor
+  SAUDE_FINANCEIRA /// cobrança vencida ou renegociada — o FREIO das ofertas de venda
 }
 
 /// GATILHO — a regra como DADO editável.
@@ -780,4 +783,53 @@ model MudancaDeConfig {
   @@index([entidade, em])
   @@index([em])
   @@map("mudancas_de_config")
+}
+
+// ===========================================================================
+// Tokens do MCP — um por pessoa
+// ===========================================================================
+
+enum EscopoToken {
+  LEITURA /// só as ferramentas que leem
+  ESCRITA /// todas — inclusive configuração e carga
+}
+
+/// TOKEN PESSOAL DO MCP.
+///
+/// Pedido do dono em 2026-09-18: *"crie a possibilidade de tokens individuais
+/// por conta"*.
+///
+/// ⚠ Existe porque o token único do `.env` não diz QUEM fez. Toda escrita pelo
+/// MCP aparecia em `mudancas_de_config` como "mcp:claude-code" — um rótulo que
+/// o próprio cliente declara, e que não prova nada. Com token por pessoa, o
+/// rastro passa a dizer "diego@… via MCP", e dá para revogar o token de um sem
+/// derrubar o de todos.
+///
+/// O token do `.env` continua valendo como MASTER, para desenvolvimento (pedido
+/// do dono no mesmo dia). Os pessoais é que são o caminho para o time.
+///
+/// ⚠ **O token em si nunca é guardado.** Só o SHA-256. Ele é mostrado uma vez,
+/// na criação, e depois disso nem o banco sabe qual é — é o que torna um vazamento
+/// do banco inofensivo para o MCP.
+model TokenMcp {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Para a pessoa reconhecer: "Claude Code do notebook", "Claude Desktop".
+  nome    String
+  /// Os primeiros caracteres, para identificar o token sem revelá-lo.
+  prefixo String
+  /// SHA-256 do token, em hex. É por aqui que a autenticação procura.
+  hash    String      @unique
+  escopo  EscopoToken @default(LEITURA)
+
+  criadoEm    DateTime  @default(now())
+  ultimoUsoEm DateTime?
+  /// Revogado não se apaga: o rastro de "quem fez o quê" aponta para ele.
+  revogadoEm  DateTime?
+  revogadoPor String?
+
+  @@index([userId])
+  @@map("tokens_mcp")
 }

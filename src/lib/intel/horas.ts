@@ -73,6 +73,31 @@ export interface HorasDoCliente {
 const CICLOS_ANALISADOS = 3;
 
 /**
+ * Valor da venda de cada reserva `notBilled` — só delas.
+ *
+ * ⚠ Só `notBilled` precisa: para os outros status a resposta já vem no próprio
+ * status. Carregar a venda de toda reserva seria um `IN` de milhares de ids
+ * para mudar nada.
+ */
+async function valoresDasVendas(
+  reservas: Array<{ status: string | null; saleConexaId: number | null }>,
+): Promise<Map<number, number>> {
+  const ids = [
+    ...new Set(
+      reservas
+        .filter((r) => r.status === "notBilled" && r.saleConexaId !== null)
+        .map((r) => r.saleConexaId!),
+    ),
+  ];
+  if (!ids.length) return new Map();
+  const vendas = await prisma.sale.findMany({
+    where: { conexaId: { in: ids } },
+    select: { conexaId: true, amount: true },
+  });
+  return new Map(vendas.map((v) => [v.conexaId, Number(v.amount)]));
+}
+
+/**
  * Os limiares do gatilho de excedente, vindos da configuração.
  *
  * ⚠ Opcionais, e os defaults são os valores de sempre: quem chama sem passar
@@ -181,15 +206,24 @@ export async function horasDoCliente(
             lt: new Date(Math.max(...bordas.map((d) => d.getTime()))),
           },
         },
-        select: { status: true, isActive: true, cancellationReason: true, horas: true, dataLocal: true },
+        select: {
+          status: true,
+          isActive: true,
+          cancellationReason: true,
+          horas: true,
+          dataLocal: true,
+          saleConexaId: true,
+        },
       })
     : [];
+  const valorDa = await valoresDasVendas(reservas);
   const paraConsumo: ReservaParaConsumo[] = reservas.map((r) => ({
     status: r.status,
     isActive: r.isActive,
     cancellationReason: r.cancellationReason,
     horas: r.horas?.toString() ?? null,
     dataLocal: r.dataLocal,
+    valorDaVenda: r.saleConexaId !== null ? valorDa.get(r.saleConexaId) ?? null : null,
   }));
 
   const blocos: HorasDoContrato[] = [];
@@ -366,9 +400,11 @@ export async function clientesComExcedente(
           cancellationReason: true,
           horas: true,
           dataLocal: true,
+          saleConexaId: true,
         },
       })
     : [];
+  const valorDa = await valoresDasVendas(reservas);
 
   const reservasPor = new Map<number, ReservaParaConsumo[]>();
   for (const r of reservas) {
@@ -380,6 +416,7 @@ export async function clientesComExcedente(
       cancellationReason: r.cancellationReason,
       horas: r.horas?.toString() ?? null,
       dataLocal: r.dataLocal,
+      valorDaVenda: r.saleConexaId !== null ? valorDa.get(r.saleConexaId) ?? null : null,
     });
     reservasPor.set(r.customerConexaId, lista);
   }

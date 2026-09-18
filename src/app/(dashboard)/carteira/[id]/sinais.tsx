@@ -52,7 +52,9 @@ const ORDEM: EstadoSinal[] = ["ATIVO", "AMBIGUO", "DADO_INDISPONIVEL", "NAO_APLI
 export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId: number }) {
   const sinais = await sinaisDoCliente(customerConexaId);
   const conta = (e: EstadoSinal) => sinais.filter((s) => s.estado === e).length;
-  const ativos = conta("ATIVO");
+  // O freio não é oportunidade: não entra na conta de "gatilhos ativos".
+  const ativos = sinais.filter((x) => x.estado === "ATIVO" && x.familia !== "SAUDE_FINANCEIRA").length;
+  const freio = sinais.find((x) => x.familia === "SAUDE_FINANCEIRA" && x.estado === "ATIVO");
   const desligados = sinais.filter((x) => x.desligado).length;
 
   // Ativo e ambíguo primeiro: é o que o vendedor precisa ler. O resto é
@@ -72,8 +74,11 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
           : `As ${sinais.length} regras configuradas, avaliadas contra os dados deste cliente, agora.`
       }
       acao={
-        <span className={cn("selo", ativos > 0 ? "selo-bom" : "")}>
-          {ativos} {ativos === 1 ? "gatilho ativo" : "gatilhos ativos"}
+        <span className="flex flex-wrap items-center gap-1.5">
+          {freio ? <span className="selo selo-critico">freio acionado</span> : null}
+          <span className={cn("selo", ativos > 0 ? "selo-bom" : "")}>
+            {ativos} {ativos === 1 ? "gatilho ativo" : "gatilhos ativos"}
+          </span>
         </span>
       }
     >
@@ -124,7 +129,13 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
             </thead>
             <tbody>
               {ordenados.map((s) => {
-                const e = ESTILO[s.estado];
+                // ⚠ O freio acionado usa o estilo crítico, não o verde de
+                // "gatilho ativo": verde diria "oportunidade" sobre um cliente
+                // que está devendo.
+                const ehFreio = s.familia === "SAUDE_FINANCEIRA" && s.estado === "ATIVO";
+                const e = ehFreio
+                  ? { ...ESTILO.DADO_INDISPONIVEL, Icone: TriangleAlert, rotulo: "freio acionado" }
+                  : ESTILO[s.estado];
                 return (
                   <tr key={s.regra}>
                     <td className="pl-0 pr-0">
@@ -133,7 +144,7 @@ export async function SinaisAutomaticos({ customerConexaId }: { customerConexaId
                     <td>
                       <span className="font-medium">{s.nome}</span>
                       <span className="selo ml-2">
-                        {s.regra === "extra" || s.regra === "métrica" ? s.regra : `regra ${s.regra}`}
+                        {/^\d+$/.test(s.regra) ? `regra ${s.regra}` : s.regra}
                       </span>
                       {s.evidencia ? (
                         <div className="mt-0.5 text-[12.5px] font-medium text-[var(--critico-tinta)]">

@@ -49,7 +49,7 @@ export const paramsPorFamilia = {
 
   /** Regra 3 e a métrica do §1 — os dois jeitos de ler queda de receita. */
   TENDENCIA: z.object({
-    modo: z.enum(["quedas_seguidas", "queda_percentual"]).default("quedas_seguidas"),
+    modo: z.enum(["quedas_seguidas", "queda_percentual", "queda_sustentada"]).default("quedas_seguidas"),
     /** `quedas_seguidas`: quantas quedas consecutivas até disparar. */
     quedasSeguidas: z.number().int().min(1).max(12).default(2),
     /** `queda_percentual`: o "X%" do documento. Sempre positivo — é magnitude. */
@@ -65,6 +65,12 @@ export const paramsPorFamilia = {
      * ⚠ Correção de 2026-09-18 — sem ela, −2% contava.
      */
     quedaMinimaPct: z.number().min(0).max(100).default(10),
+    /**
+     * `queda_sustentada`: quantos meses fechados SEGUIDOS precisam estar abaixo
+     * do normal. ⚠ Correção de 2026-09-18 — um mês isolado, no regime de
+     * emissão, vem zerado por renegociação ou dobrado por calendário.
+     */
+    mesesAvaliados: z.number().int().min(1).max(6).default(2),
   }),
 
   /** Regra 4 — ">5h no mês sem contrato com cota". */
@@ -108,10 +114,47 @@ export const paramsPorFamilia = {
   SALDO_COTA: z.object({
     limiarHoras: z.number().min(0).max(500).default(5),
   }),
+
+  /** Perdeu o contrato, ou passou a pagar menos — é fato, não inferência. */
+  MUDANCA_CONTRATO: z.object({
+    modo: z.enum(["perdeu", "reduziu"]).default("perdeu"),
+    /** Quantos dias para trás olhar. */
+    janelaDias: z.number().int().min(1).max(365).default(45),
+    /** `reduziu`: quanto o valor mensal contratado precisa ter caído. */
+    limiarPct: z.number().min(1).max(100).default(20),
+  }),
+
+  /**
+   * O FREIO: cobrança vencida ou renegociada suspende as ofertas de VENDA.
+   * Não aparece no Radar — só impede que outros gatilhos apareçam.
+   */
+  SAUDE_FINANCEIRA: z.object({
+    /** Atraso a partir do qual freia. Abaixo disso é o atraso normal de quem esqueceu. */
+    diasDeAtrasoMin: z.number().int().min(0).max(365).default(15),
+    /** Dívida mais antiga que isto é outra conversa, e não trava o cliente para sempre. */
+    diasDeAtrasoMax: z.number().int().min(1).max(3650).default(105),
+    diasDeRenegociacao: z.number().int().min(1).max(365).default(90),
+  }),
 } as const;
 
 export type Familia = keyof typeof paramsPorFamilia;
 export const FAMILIAS = Object.keys(paramsPorFamilia) as Familia[];
+
+/**
+ * As famílias cuja oferta é uma VENDA — as que o freio de inadimplência suspende.
+ *
+ * ⚠ Tendência e mudança de contrato ficam de fora de propósito: elas apontam
+ * cliente saindo, e a conversa com quem está saindo acontece mesmo que ele
+ * deva. O freio impede o upgrade, não o cuidado.
+ */
+export const FAMILIAS_DE_VENDA = new Set<Familia>([
+  "MARCO_CONTRATO",
+  "USO_SEM_COTA",
+  "PRIMEIRO_EVENTO",
+  "EVENTO_EM_SEGMENTO",
+  "EXCEDENTE",
+  "SALDO_COTA",
+]);
 
 export type ParamsDe<F extends Familia> = z.infer<(typeof paramsPorFamilia)[F]>;
 
@@ -301,14 +344,53 @@ export const NATIVOS: GatilhoNativo[] = [
     nome: "Queda de receita",
     familia: "TENDENCIA",
     oferta: "olhar antes que o cliente saia",
-    condicao: "receita cai mais que o limiar de um mês para o outro",
-    params: { modo: "queda_percentual", quedasSeguidas: 2, limiarPct: 30 },
+    condicao: "os 2 últimos meses fechados abaixo de 70% da mediana dos 6 anteriores",
+    params: { modo: "queda_sustentada", mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 },
     peso: 35,
     ordem: 11,
     bloqueio: null,
-    nota: "compara com a MEDIANA dos 3 meses anteriores, não com o mês anterior: mês com duas cobranças ou cobrança anual não vira queda no mês seguinte · ⚠ o limiar de 30% é exemplo do documento, não decisão do cliente",
+    nota: "QUEDA SUSTENTADA: dois meses fechados seguidos abaixo do normal — um mês isolado vem zerado por renegociação ou dobrado por calendário · quem renegociou no período é ambíguo, não queda · o mês em curso só desmente, nunca dispara · ⚠ o limiar de 30% é exemplo do documento, não decisão do cliente",
   },
 ];
+
+NATIVOS.push(
+  {
+    codigo: "contrato-perdido",
+    nome: "Perdeu o contrato",
+    familia: "MUDANCA_CONTRATO",
+    oferta: "entender a saída — e tentar reconquistar",
+    condicao: "o último contrato terminou nos últimos 45 dias e o cliente ficou sem nenhum",
+    params: { modo: "perdeu", janelaDias: 45, limiarPct: 20 },
+    peso: 80,
+    ordem: 12,
+    bloqueio: null,
+    nota: "é fato, não inferência — 29 clientes em 45 dias quando foi medido (2026-09-18), e ninguém era avisado · chega depois da saída: o contrato quase nunca avisa antes, porque 1.338 contratos ativos não têm data de fim",
+  },
+  {
+    codigo: "contrato-reduzido",
+    nome: "Contrato reduzido",
+    familia: "MUDANCA_CONTRATO",
+    oferta: "entender a redução antes que vire saída",
+    condicao: "o valor mensal contratado caiu 20% ou mais nos últimos 45 dias",
+    params: { modo: "reduziu", janelaDias: 45, limiarPct: 20 },
+    peso: 70,
+    ordem: 13,
+    bloqueio: null,
+    nota: "o sinal mais limpo medido: das 6 trocas de contrato em 45 dias, 4 eram reduções reais (R$ 2.000 → R$ 119, R$ 1.900 → R$ 99,90) e as 2 renovações pelo mesmo valor não disparam · contrato anual entra pelo valor mensal (÷ 12)",
+  },
+  {
+    codigo: "freio",
+    nome: "Freio: cobrança em atraso",
+    familia: "SAUDE_FINANCEIRA",
+    oferta: "nenhuma oferta de venda — é conversa de cobrança",
+    condicao: "cobrança vencida há 15 a 105 dias, ou renegociada nos últimos 90",
+    params: { diasDeAtrasoMin: 15, diasDeAtrasoMax: 105, diasDeRenegociacao: 90 },
+    peso: 0,
+    ordem: 14,
+    bloqueio: null,
+    nota: "não aparece no Radar: SUSPENDE as ofertas de venda (marcos, pacote, primeira reserva, excedente) de quem está devendo · não suspende os sinais de saída — com quem está saindo a conversa acontece mesmo com dívida · desligar o freio devolve as ofertas",
+  },
+);
 
 export const CODIGOS_NATIVOS = new Set(NATIVOS.map((n) => n.codigo));
 

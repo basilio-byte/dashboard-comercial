@@ -118,6 +118,15 @@ export interface ReservaParaConsumo {
   horas?: number | string | null;
   /** Início, para saber em que ciclo cai. */
   dataLocal?: Date | null;
+  /**
+   * Valor da venda ligada à reserva. `undefined` = não carregado (o
+   * comportamento antigo, só pelo status); `null` = não há venda.
+   *
+   * ⚠ Desde ago/2026 a sala é cobrada na fatura do mês seguinte, e a hora que
+   * passou da cota chega como `notBilled` com venda de valor. Medido em
+   * 2026-09-18: 219h assim em agosto, contra 119h que o excedente enxergava.
+   */
+  valorDaVenda?: number | null;
 }
 
 /**
@@ -156,7 +165,9 @@ export const STATUS_FATURADA = new Set(["billed", "paid", "partiallyPaid"]);
 export function faturada(r: ReservaParaConsumo): boolean {
   if (r.isActive === false) return false;
   if (r.cancellationReason) return false;
-  return STATUS_FATURADA.has(r.status ?? "");
+  if (STATUS_FATURADA.has(r.status ?? "")) return true;
+  // `notBilled` com venda de valor é hora vendida, cobrada no mês seguinte.
+  return r.status === "notBilled" && (r.valorDaVenda ?? 0) > 0;
 }
 
 /** Status DOCUMENTADOS de reserva, conforme a coleção Postman da API v2. */
@@ -173,7 +184,8 @@ const STATUS_DESCARTE = new Set(["cancelled", "billedCancelled"]);
 export function naoFaturada(r: ReservaParaConsumo): boolean {
   if (r.isActive === false) return false;
   if (r.cancellationReason) return false;
-  return r.status === "notBilled";
+  // Só a que NÃO tem venda de valor: cortesia, ou venda ainda não carregada.
+  return r.status === "notBilled" && !((r.valorDaVenda ?? 0) > 0);
 }
 
 export interface ConsumoDoCiclo {

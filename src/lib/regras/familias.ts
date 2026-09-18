@@ -1,5 +1,5 @@
 import { addMesesClamp } from "@/lib/metrics/horas";
-import type { Money } from "@/lib/money";
+import { money, type Money } from "@/lib/money";
 
 /**
  * AS FAMÍLIAS DE REGRA — funções PURAS.
@@ -440,4 +440,252 @@ export function posseDoProduto(p: {
 /** Só `NAO_POSSUI` libera a oferta. Ambíguo e desconhecido seguram. */
 export function podeOfertar(posse: Posse): boolean {
   return posse === "NAO_POSSUI";
+}
+
+// ---------------------------------------------------------------------------
+// TENDENCIA — queda SUSTENTADA (a métrica, desde 2026-09-18)
+// ---------------------------------------------------------------------------
+
+/**
+ * A receita ficou abaixo do normal por MAIS DE UM mês?
+ *
+ * ⚠ Terceira versão da métrica, e o motivo é medido. A primeira comparava um
+ * mês com o anterior; a segunda, um mês com a mediana dos anteriores. As duas
+ * erravam no mesmo ponto: avaliar UM mês isolado no regime de emissão, onde um
+ * mês sozinho pode vir zerado por renegociação, dobrado por emissão antecipada,
+ * ou deslocado porque a sala passou a ser cobrada no mês seguinte (ago/2026).
+ * Com base de 6 meses ficou PIOR — 17 sinais contra 14.
+ *
+ * Agora: os `mesesAvaliados` últimos meses fechados precisam TODOS estar abaixo
+ * de `(1 − limiar)` × a mediana dos `mesesDeBase` anteriores. Um mês atípico
+ * não basta mais; dois seguidos, sim.
+ *
+ * ⚠ O mês em curso só pode DESMENTIR, nunca criar. Se o mês que ainda não
+ * fechou já alcançou o normal, a queda dos anteriores era calendário — foi o
+ * caso dos que renegociaram e pagaram tudo de uma vez em setembro. Mas mês pela
+ * metade nunca dispara alerta: faria a base inteira "cair" todo dia 1º.
+ */
+export function quedaSustentada(p: {
+  serie: PontoMensal[];
+  mesesAvaliados: number;
+  mesesDeBase: number;
+  limiarPct: number;
+  /** Receita do mês em curso até agora. `null` = não informado. */
+  mesEmCurso?: Money | null;
+}): {
+  disparou: boolean;
+  variacaoPct: number | null;
+  base: Money | null;
+  avaliados: string[];
+  semBase: "SERIE_CURTA" | "BASE_ZERO" | null;
+  desmentidoPeloMesEmCurso: boolean;
+} {
+  const serie = [...p.serie].sort((a, b) => a.mesKey.localeCompare(b.mesKey));
+  const nAval = Math.max(1, p.mesesAvaliados);
+  // Base mínima de 3: menos que isso, mediana é só "um dos valores".
+  const nBase = Math.min(Math.max(3, p.mesesDeBase), Math.max(0, serie.length - nAval));
+  const nulo = {
+    disparou: false,
+    variacaoPct: null,
+    base: null,
+    avaliados: [] as string[],
+    desmentidoPeloMesEmCurso: false,
+  };
+  if (serie.length < nAval + 3) return { ...nulo, semBase: "SERIE_CURTA" };
+
+  const avaliados = serie.slice(-nAval);
+  const base = mediana(serie.slice(-(nAval + nBase), -nAval).map((x) => x.valor))!;
+  const meses = avaliados.map((a) => a.mesKey);
+  if (base.lessThanOrEqualTo(0)) return { ...nulo, avaliados: meses, base, semBase: "BASE_ZERO" };
+
+  const teto = base.times(1 - Math.abs(p.limiarPct) / 100);
+  const media = avaliados
+    .reduce((acc, a) => acc.plus(a.valor), money(0))
+    .div(avaliados.length);
+  const variacaoPct = Number(media.minus(base).div(base).times(100));
+  const todosAbaixo = avaliados.every((a) => a.valor.lessThanOrEqualTo(teto));
+  const desmentido = !!p.mesEmCurso && p.mesEmCurso.greaterThan(teto);
+
+  return {
+    disparou: todosAbaixo && !desmentido,
+    variacaoPct,
+    base,
+    avaliados: meses,
+    semBase: null,
+    desmentidoPeloMesEmCurso: todosAbaixo && desmentido,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MUDANCA_CONTRATO — perdeu o contrato, ou trocou por um menor
+// ---------------------------------------------------------------------------
+
+export interface ContratoParaValor {
+  conexaId: number;
+  amount: Money;
+  paymentFrequency: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  isActive: boolean;
+}
+
+const MESES_DA_PERIODICIDADE: Record<string, number> = {
+  Monthly: 1,
+  Bimonthly: 2,
+  Quarterly: 3,
+  Semester: 6,
+  Yearly: 12,
+};
+
+/**
+ * Valor MENSAL de um contrato. Anual de R$ 1.200 vale R$ 100/mês.
+ *
+ * ⚠ Sem isso, trocar um contrato anual por um mensal pareceria uma queda de
+ * 92% — e 328 dos contratos ativos são anuais.
+ */
+export function valorMensalDoContrato(c: Pick<ContratoParaValor, "amount" | "paymentFrequency">): Money {
+  return c.amount.div(MESES_DA_PERIODICIDADE[c.paymentFrequency ?? "Monthly"] ?? 1);
+}
+
+/**
+ * Quanto o cliente tinha contratado, por mês, numa data.
+ *
+ * Um contrato vale na data quando começou até ela e ainda não tinha terminado.
+ * Sem data de fim, vale enquanto estiver ativo — são 1.338 contratos assim, e é
+ * por isso que "contrato vencendo" quase nunca avisa nada.
+ */
+export function valorContratadoEm(contratos: ContratoParaValor[], data: Date): Money | null {
+  let total: Money | null = null;
+  for (const c of contratos) {
+    if (!c.startDate || c.startDate > data) continue;
+    const vale = c.endDate ? c.endDate > data : c.isActive;
+    if (!vale) continue;
+    const v = valorMensalDoContrato(c);
+    total = total ? total.plus(v) : v;
+  }
+  return total;
+}
+
+/**
+ * O cliente perdeu o contrato, ou passou a pagar menos, nos últimos N dias?
+ *
+ * ⚠ É FATO, não inferência — e foi o sinal mais limpo medido em 2026-09-18.
+ * Das 6 trocas de contrato em 45 dias, 4 eram reduções reais, entre elas as
+ * duas maiores quedas que a métrica de receita tinha achado (R$ 2.000 → R$ 119
+ * e R$ 1.900 → R$ 99,90) — aqui sem ruído nenhum. As outras 2 eram renovação
+ * pelo mesmo valor, que este cálculo corretamente não aponta.
+ */
+export function mudancaDeContrato(p: {
+  contratos: ContratoParaValor[];
+  hoje: Date;
+  janelaDias: number;
+  limiarPct: number;
+}): {
+  perdeu: boolean;
+  reduziu: boolean;
+  antes: Money | null;
+  agora: Money | null;
+  variacaoPct: number | null;
+  /** O contrato que terminou dentro da janela, quando há. */
+  encerrado: ContratoParaValor | null;
+} {
+  const desde = new Date(p.hoje);
+  desde.setUTCDate(desde.getUTCDate() - p.janelaDias);
+
+  const antes = valorContratadoEm(p.contratos, desde);
+  const agora = valorContratadoEm(p.contratos, p.hoje);
+  const encerrado =
+    p.contratos
+      .filter((c) => c.endDate && c.endDate > desde && c.endDate <= p.hoje)
+      .sort((a, b) => b.endDate!.getTime() - a.endDate!.getTime())[0] ?? null;
+
+  const temAntes = !!antes && antes.greaterThan(0);
+  const temAgora = !!agora && agora.greaterThan(0);
+  const variacaoPct = temAntes ? Number((agora ?? money(0)).minus(antes!).div(antes!).times(100)) : null;
+
+  return {
+    // Perdeu: tinha, não tem mais, e um contrato terminou dentro da janela —
+    // sem esta última condição, cliente que nunca teve contrato vigente na
+    // data de referência também "perderia".
+    perdeu: temAntes && !temAgora && !!encerrado,
+    reduziu:
+      temAntes && temAgora && variacaoPct !== null && variacaoPct <= -Math.abs(p.limiarPct),
+    antes,
+    agora,
+    variacaoPct,
+    encerrado,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SAUDE_FINANCEIRA — o FREIO das ofertas de venda
+// ---------------------------------------------------------------------------
+
+export interface CobrancaParaFreio {
+  status: string | null;
+  dueDate: Date | null;
+  emissionDate: Date | null;
+  valor: Money;
+}
+
+/**
+ * O cliente está devendo, ou acabou de renegociar?
+ *
+ * ⚠ Não é um sinal de venda: é o que SUSPENDE os sinais de venda. Oferecer o
+ * plano Bianual a quem está com a cobrança vencida é a conversa errada — e,
+ * pelo desenho anterior, bastava o cliente completar 11 meses para receber a
+ * oferta, devendo ou não. Medido em 2026-09-18: 49 clientes elegíveis com
+ * cobrança vencida entre 15 e 105 dias, 83 que renegociaram em 90 dias.
+ *
+ * O atraso tem teto (`diasDeAtrasoMax`) de propósito: dívida de dois anos é
+ * outra conversa, provavelmente já com o jurídico, e não deve travar para
+ * sempre um cliente que segue pagando o contrato atual.
+ */
+export function situacaoFinanceira(p: {
+  cobrancas: CobrancaParaFreio[];
+  hoje: Date;
+  diasDeAtrasoMin: number;
+  diasDeAtrasoMax: number;
+  diasDeRenegociacao: number;
+}): {
+  freiar: boolean;
+  vencidas: number;
+  valorVencido: Money | null;
+  maiorAtrasoDias: number;
+  renegociou: boolean;
+  motivo: string | null;
+} {
+  const dia = 86_400_000;
+  let vencidas = 0;
+  let valorVencido: Money | null = null;
+  let maiorAtrasoDias = 0;
+  let renegociou = false;
+
+  for (const c of p.cobrancas) {
+    if (c.status === "unpaid" && c.dueDate) {
+      const atraso = Math.floor((p.hoje.getTime() - c.dueDate.getTime()) / dia);
+      if (atraso >= p.diasDeAtrasoMin && atraso <= p.diasDeAtrasoMax) {
+        vencidas++;
+        valorVencido = valorVencido ? valorVencido.plus(c.valor) : c.valor;
+        maiorAtrasoDias = Math.max(maiorAtrasoDias, atraso);
+      }
+    }
+    if (c.status === "negotiated") {
+      const ref = c.dueDate ?? c.emissionDate;
+      if (ref && (p.hoje.getTime() - ref.getTime()) / dia <= p.diasDeRenegociacao) renegociou = true;
+    }
+  }
+
+  const partes: string[] = [];
+  if (vencidas) partes.push(`${vencidas} cobrança(s) vencida(s), a mais antiga há ${maiorAtrasoDias} dias`);
+  if (renegociou) partes.push(`renegociou nos últimos ${p.diasDeRenegociacao} dias`);
+
+  return {
+    freiar: vencidas > 0 || renegociou,
+    vencidas,
+    valorVencido,
+    maiorAtrasoDias,
+    renegociou,
+    motivo: partes.length ? partes.join("; ") : null,
+  };
 }

@@ -10,8 +10,14 @@ import {
   quedaContraBase,
   quedaMesAMes,
   quedaPercentual,
+  quedaSustentada,
   ehHoraAvulsa,
+  mudancaDeContrato,
+  situacaoFinanceira,
   temEvidenciaDeCota,
+  valorContratadoEm,
+  valorMensalDoContrato,
+  type ContratoParaValor,
   podeOfertar,
   posseDoProduto,
   usoAvulsoAlto,
@@ -373,5 +379,174 @@ describe("USO_SEM_COTA — o que é hora avulsa (corrigido em 2026-09-18)", () =
 
   it("cobrança cancelada não conta", () => {
     expect(ehHoraAvulsa({ status: "billedCancelled", valorDaVenda: 90 })).toBe(false);
+  });
+});
+
+/**
+ * ⚠ Séries e contratos REAIS da produção (2026-09-18), sem nome de cliente.
+ * Cada caso foi um sinal certo ou errado conferido linha a linha.
+ */
+describe("TENDENCIA — queda SUSTENTADA (a métrica desde 2026-09-18)", () => {
+  const base6 = (v: number) =>
+    serie(["2026-01", v], ["2026-02", v], ["2026-03", v], ["2026-04", v], ["2026-05", v], ["2026-06", v]);
+
+  it("dois meses seguidos abaixo do normal disparam — o caso real de R$ 2.000 que foi a zero", () => {
+    const s = [...base6(2000), ...serie(["2026-07", 0], ["2026-08", 0])];
+    const r = quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 });
+    expect(r.disparou).toBe(true);
+    expect(r.avaliados).toEqual(["2026-07", "2026-08"]);
+  });
+
+  it("⚠ um mês isolado baixo NÃO dispara — era o defeito das duas versões anteriores", () => {
+    // 1900 estável, julho ainda 1900, agosto 219: queda real, mas de um mês só.
+    // Espera o próximo mês fechar — e o "contrato reduzido" pega esse caso já.
+    const s = [...base6(1900), ...serie(["2026-07", 1900], ["2026-08", 219])];
+    expect(quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 }).disparou).toBe(false);
+  });
+
+  it("⚠ o mês em curso DESMENTE: quem pagou tudo de uma vez em setembro não caiu", () => {
+    // O caso real da renegociação: 113 por mês, zero em jul e ago, 337 em setembro.
+    const s = [...base6(113), ...serie(["2026-07", 0], ["2026-08", 0])];
+    const r = quedaSustentada({
+      serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30, mesEmCurso: money(337),
+    });
+    expect(r.disparou).toBe(false);
+    expect(r.desmentidoPeloMesEmCurso).toBe(true);
+  });
+
+  it("⚠ o mês em curso nunca CRIA queda: pela metade ele sempre parece baixo", () => {
+    const s = [...base6(100), ...serie(["2026-07", 100], ["2026-08", 100])];
+    const r = quedaSustentada({
+      serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30, mesEmCurso: money(0),
+    });
+    expect(r.disparou).toBe(false);
+  });
+
+  it("base com dois meses atípicos não vira normal — a mediana de 6 aguenta", () => {
+    // O caso da base de 3 que falhava: 1273 (avulso) e 205 (duas cobranças) no
+    // meio de ~103. Com 6 meses de base, a mediana volta a ser ~103.
+    const s = serie(
+      ["2026-01", 100], ["2026-02", 104], ["2026-03", 101], ["2026-04", 102],
+      ["2026-05", 1273], ["2026-06", 205], ["2026-07", 103], ["2026-08", 107],
+    );
+    expect(quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 }).disparou).toBe(false);
+  });
+
+  it("contrato anual (zero quase todo mês) não tem base, e não é queda", () => {
+    const s = serie(
+      ["2026-01", 0], ["2026-02", 0], ["2026-03", 0], ["2026-04", 0],
+      ["2026-05", 0], ["2026-06", 0], ["2026-07", 900], ["2026-08", 0],
+    );
+    const r = quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 });
+    expect(r.disparou).toBe(false);
+  });
+
+  it("série curta demais declara que não tem base", () => {
+    const s = serie(["2026-06", 100], ["2026-07", 0], ["2026-08", 0]);
+    expect(quedaSustentada({ serie: s, mesesAvaliados: 2, mesesDeBase: 6, limiarPct: 30 }).semBase).toBe("SERIE_CURTA");
+  });
+});
+
+describe("MUDANCA_CONTRATO — contratos reais de 2026-09-18", () => {
+  const hoje = d("2026-09-18");
+  const k = (
+    conexaId: number, valor: number, inicio: string, fim: string | null, ativo: boolean, freq = "Monthly",
+  ): ContratoParaValor => ({
+    conexaId, amount: money(valor), paymentFrequency: freq,
+    startDate: d(inicio), endDate: fim ? d(fim) : null, isActive: ativo,
+  });
+
+  it("anual vale pelo valor MENSAL — trocar anual por mensal não é queda de 92%", () => {
+    expect(valorMensalDoContrato({ amount: money(1200), paymentFrequency: "Yearly" }).toNumber()).toBe(100);
+  });
+
+  it("trocou R$ 330 por R$ 90: reduziu", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(10434, 330, "2025-10-01", "2026-09-05", false), k(12552, 90, "2026-09-11", null, true)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.reduziu).toBe(true);
+    expect(r.perdeu).toBe(false);
+    expect(Math.round(r.variacaoPct!)).toBe(-73);
+  });
+
+  it("⚠ renovou pelo MESMO valor: não é redução — eram 2 das 6 trocas medidas", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(12126, 99.9, "2025-08-24", "2026-08-24", false), k(12488, 99.9, "2026-08-24", null, true)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.reduziu).toBe(false);
+    expect(r.perdeu).toBe(false);
+  });
+
+  it("tinha dois, ficou com o menor: reduziu (69,80 → 19,90)", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(11245, 49.9, "2025-06-01", "2026-09-01", false), k(12403, 19.9, "2026-03-03", null, true)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.reduziu).toBe(true);
+  });
+
+  it("o último contrato terminou e não há outro: perdeu", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(10100, 150, "2025-03-01", "2026-09-10", false)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.perdeu).toBe(true);
+    expect(r.encerrado!.conexaId).toBe(10100);
+  });
+
+  it("terminou FORA da janela: não é notícia", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(10100, 150, "2025-03-01", "2026-06-10", false)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.perdeu).toBe(false);
+  });
+
+  it("cliente novo (não tinha nada 45 dias atrás) não é redução nem perda", () => {
+    const r = mudancaDeContrato({
+      contratos: [k(12700, 99.9, "2026-09-01", null, true)],
+      hoje, janelaDias: 45, limiarPct: 20,
+    });
+    expect(r.reduziu).toBe(false);
+    expect(r.perdeu).toBe(false);
+  });
+
+  it("contrato inativo sem data de fim não conta como vigente", () => {
+    expect(valorContratadoEm([k(1, 100, "2025-01-01", null, false)], hoje)).toBeNull();
+  });
+});
+
+describe("SAUDE_FINANCEIRA — o freio", () => {
+  const hoje = d("2026-09-18");
+  const c = (status: string, vence: string, valor = 100) => ({
+    status, dueDate: d(vence), emissionDate: d(vence), valor: money(valor),
+  });
+  const params = { hoje, diasDeAtrasoMin: 15, diasDeAtrasoMax: 105, diasDeRenegociacao: 90 };
+
+  it("cobrança vencida há 40 dias freia", () => {
+    const r = situacaoFinanceira({ cobrancas: [c("unpaid", "2026-08-09", 350)], ...params });
+    expect(r.freiar).toBe(true);
+    expect(r.maiorAtrasoDias).toBe(40);
+    expect(r.valorVencido!.toNumber()).toBe(350);
+  });
+
+  it("atraso de 5 dias NÃO freia — é quem esqueceu, não quem deve", () => {
+    expect(situacaoFinanceira({ cobrancas: [c("unpaid", "2026-09-13")], ...params }).freiar).toBe(false);
+  });
+
+  it("⚠ dívida de dois anos não trava o cliente para sempre", () => {
+    expect(situacaoFinanceira({ cobrancas: [c("unpaid", "2024-09-01")], ...params }).freiar).toBe(false);
+  });
+
+  it("renegociou há 50 dias: freia", () => {
+    const r = situacaoFinanceira({ cobrancas: [c("negotiated", "2026-07-29")], ...params });
+    expect(r.freiar).toBe(true);
+    expect(r.renegociou).toBe(true);
+  });
+
+  it("cobrança paga não freia, mesmo antiga", () => {
+    expect(situacaoFinanceira({ cobrancas: [c("paid", "2026-08-01")], ...params }).freiar).toBe(false);
   });
 });

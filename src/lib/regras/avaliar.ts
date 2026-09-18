@@ -10,12 +10,17 @@ import {
   primeiraReserva,
   quedaContraBase,
   quedaMesAMes,
+  quedaSustentada,
   ehHoraAvulsa,
+  mudancaDeContrato,
+  situacaoFinanceira,
   temEvidenciaDeCota,
   usoAvulsoAlto,
+  type CobrancaParaFreio,
+  type ContratoParaValor,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
-import { lerParams } from "./catalogo";
+import { FAMILIAS_DE_VENDA, lerParams } from "./catalogo";
 import { carregarSegmentos, type MapaDeSegmentos } from "./segmentos";
 
 /**
@@ -111,6 +116,14 @@ interface ContextoDoCliente {
   /** O cliente já tem SeaBox, e por qual via. */
   posseSeabox: "POR_COMPRA" | "POR_CORTESIA" | "NAO_POSSUI" | "DESCONHECIDO";
   temContratoSeaBox: boolean;
+  /** TODOS os contratos, vigentes e encerrados — para mudança de contrato. */
+  contratosParaValor: ContratoParaValor[];
+  /** Cobranças vencidas ou renegociadas do último ano — para o freio e a tendência. */
+  cobrancas: CobrancaParaFreio[];
+  /** Receita do mês em curso até agora. Só pode DESMENTIR uma queda. */
+  receitaMesEmCurso: Money | null;
+  /** O freio acionado, quando está. `null` = ofertas liberadas. */
+  freio: { nome: string; motivo: string } | null;
 }
 
 export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]> {
@@ -123,7 +136,11 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
   // consulta porque `horasDoCliente` precisa deles.
   const pExcedente = lerParams("EXCEDENTE", gatilhos.porCodigo.get("extra")?.params).params;
 
-  const [contratos, horas, bookings, mensais, vendas] = await Promise.all([
+  // Um ano de cobranças basta: o freio olha até 105 dias e a tendência, meses.
+  const umAnoAtras = new Date(hoje);
+  umAnoAtras.setUTCDate(umAnoAtras.getUTCDate() - 400);
+
+  const [contratos, horas, bookings, mensais, vendas, todosContratos, cobrancasBrutas] = await Promise.all([
     prisma.contract.findMany({
       where: {
         customerConexaId,
@@ -147,6 +164,25 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
       orderBy: { mesKey: "asc" },
     }),
     prisma.sale.findMany({ where: { customerConexaId }, select: { productConexaId: true } }),
+    prisma.contract.findMany({
+      where: { customerConexaId },
+      select: {
+        conexaId: true,
+        amount: true,
+        paymentFrequency: true,
+        startDate: true,
+        endDate: true,
+        isActive: true,
+      },
+    }),
+    prisma.charge.findMany({
+      where: {
+        customerConexaId,
+        status: { in: ["unpaid", "negotiated"] },
+        OR: [{ dueDate: { gte: umAnoAtras } }, { emissionDate: { gte: umAnoAtras } }],
+      },
+      select: { status: true, dueDate: true, emissionDate: true, amount: true, currentAmount: true },
+    }),
   ]);
 
   const planoIds = [...new Set(contratos.map((c) => c.planConexaId).filter((x): x is number => x !== null))];
@@ -259,6 +295,37 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     return p?.horasInclusasMes == null;
   };
 
+  const contratosParaValor: ContratoParaValor[] = todosContratos.map((c) => ({
+    conexaId: c.conexaId,
+    amount: money(c.amount.toString()),
+    paymentFrequency: c.paymentFrequency,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    isActive: c.isActive,
+  }));
+  const cobrancas: CobrancaParaFreio[] = cobrancasBrutas.map((c) => ({
+    status: c.status,
+    dueDate: c.dueDate,
+    emissionDate: c.emissionDate,
+    valor: money((c.currentAmount ?? c.amount).toString()),
+  }));
+  const emCurso = mensais.find((m) => m.mesKey === mesAtual);
+
+  /**
+   * O freio é avaliado ANTES dos outros gatilhos, porque os suspende. Qualquer
+   * gatilho de saúde financeira ligado que acione basta — o comum é haver um só.
+   */
+  let freio: ContextoDoCliente["freio"] = null;
+  for (const g of gatilhos.todos) {
+    if (g.familia !== "SAUDE_FINANCEIRA" || !g.ativo || g.bloqueio) continue;
+    const pf = lerParams("SAUDE_FINANCEIRA", g.params).params;
+    const sf = situacaoFinanceira({ cobrancas, hoje, ...pf });
+    if (sf.freiar) {
+      freio = { nome: g.nome, motivo: sf.motivo! };
+      break;
+    }
+  }
+
   const ctx: ContextoDoCliente = {
     hoje,
     mesAtual,
@@ -279,6 +346,10 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     serie,
     posseSeabox,
     temContratoSeaBox,
+    contratosParaValor,
+    cobrancas,
+    receitaMesEmCurso: emCurso ? money(emCurso.receita.toString()) : null,
+    freio,
   };
 
   // A ordem é a do catálogo (`ordem`), já aplicada por `carregarGatilhos`.
@@ -318,6 +389,26 @@ function avaliarGatilho(g: GatilhoResolvido, ctx: ContextoDoCliente): Sinal {
     };
   }
 
+  const sinal = avaliarFamilia(g, ctx, base);
+
+  /**
+   * ⚠ O freio vem DEPOIS da avaliação, e não antes, de propósito. Suspender sem
+   * avaliar esconderia do vendedor que o cliente bateria o marco — e ele não
+   * saberia por que a oferta sumiu. Assim a ficha diz "dispararia, e está
+   * suspenso", que é a informação inteira.
+   */
+  if (ctx.freio && FAMILIAS_DE_VENDA.has(g.familia) && (sinal.estado === "ATIVO" || sinal.estado === "AMBIGUO")) {
+    return {
+      ...sinal,
+      estado: "NAO_APLICAVEL",
+      motivo: `Dispararia (${sinal.evidencia ?? sinal.motivo}), mas está SUSPENSO pelo freio: ${ctx.freio.motivo}. Oferta de venda para quem está devendo é a conversa errada.`,
+      evidencia: undefined,
+    };
+  }
+  return sinal;
+}
+
+function avaliarFamilia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   switch (g.familia) {
     case "EXCEDENTE":
       return excedente(g, ctx, base);
@@ -331,6 +422,10 @@ function avaliarGatilho(g: GatilhoResolvido, ctx: ContextoDoCliente): Sinal {
       return eventoEmSegmento(g, ctx, base);
     case "TENDENCIA":
       return tendencia(g, ctx, base);
+    case "MUDANCA_CONTRATO":
+      return mudancaContrato(g, ctx, base);
+    case "SAUDE_FINANCEIRA":
+      return freioDoCliente(g, ctx, base);
     case "SALDO_COTA":
       return {
         ...base,
@@ -341,6 +436,72 @@ function avaliarGatilho(g: GatilhoResolvido, ctx: ContextoDoCliente): Sinal {
           "liberar o endpoint.",
       };
   }
+}
+
+function mudancaContrato(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("MUDANCA_CONTRATO", g.params).params;
+  const r = mudancaDeContrato({
+    contratos: ctx.contratosParaValor,
+    hoje: ctx.hoje,
+    janelaDias: p.janelaDias,
+    limiarPct: p.limiarPct,
+  });
+  const brl = (v: Money | null) => (v ? formatBRL(v) : "R$ 0,00");
+
+  if (p.modo === "perdeu") {
+    if (r.perdeu) {
+      return {
+        ...base,
+        estado: "ATIVO",
+        motivo: `Contrato #${r.encerrado!.conexaId} terminou em ${fmtDia(r.encerrado!.endDate!)} e não há outro vigente. Tinha ${brl(r.antes)}/mês contratado ${p.janelaDias} dias atrás.`,
+        evidencia: `saiu em ${fmtDia(r.encerrado!.endDate!)}`,
+      };
+    }
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo:
+        r.agora && r.agora.greaterThan(0)
+          ? `Tem contrato vigente (${brl(r.agora)}/mês).`
+          : `Nenhum contrato terminou nos últimos ${p.janelaDias} dias.`,
+    };
+  }
+
+  if (r.reduziu) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `Valor mensal contratado caiu de ${brl(r.antes)} para ${brl(r.agora)} nos últimos ${p.janelaDias} dias (${num(r.variacaoPct!)}%).`,
+      evidencia: `${num(r.variacaoPct!)}%`,
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: !r.antes
+      ? `Sem contrato vigente ${p.janelaDias} dias atrás — não há base para comparar.`
+      : !r.agora
+        ? "Sem contrato vigente hoje — isso é o gatilho \"perdeu o contrato\", não redução."
+        : `Valor mensal contratado ${r.variacaoPct === 0 ? "igual" : `variou ${num(r.variacaoPct ?? 0)}%`} nos últimos ${p.janelaDias} dias (${brl(r.antes)} → ${brl(r.agora)}).`,
+  };
+}
+
+function freioDoCliente(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
+  const p = lerParams("SAUDE_FINANCEIRA", g.params).params;
+  const r = situacaoFinanceira({ cobrancas: ctx.cobrancas, hoje: ctx.hoje, ...p });
+  if (r.freiar) {
+    return {
+      ...base,
+      estado: "ATIVO",
+      motivo: `${r.motivo}${r.valorVencido ? ` — ${formatBRL(r.valorVencido)} vencidos` : ""}. As ofertas de venda deste cliente estão suspensas; os sinais de saída continuam.`,
+      evidencia: r.vencidas ? `${r.vencidas} vencida(s), ${r.maiorAtrasoDias} dias` : "renegociou",
+    };
+  }
+  return {
+    ...base,
+    estado: "NAO_APLICAVEL",
+    motivo: `Sem cobrança vencida há ${p.diasDeAtrasoMin}–${p.diasDeAtrasoMax} dias e sem renegociação nos últimos ${p.diasDeRenegociacao} — ofertas liberadas.`,
+  };
 }
 
 type Base = Pick<Sinal, "regra" | "nome" | "familia" | "oferta">;
@@ -558,6 +719,59 @@ function eventoEmSegmento(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Bas
 
 function tendencia(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Sinal {
   const p = lerParams("TENDENCIA", g.params).params;
+
+  /**
+   * ⚠ Quem renegociou no período não tem "queda de receita": tem cobrança
+   * trocada. A régua de receita exclui a renegociada (para não contar em
+   * dobro), e o que sobra parece queda de 100% — medido em 2026-09-18: 4 dos 14
+   * sinais eram isso, com a cobrança nova de setembro somando as antigas.
+   * AMBIGUO, e não "não aplicável": o sistema não sabe, e diz que não sabe.
+   */
+  const mesesOlhados = p.modo === "queda_sustentada" ? p.mesesAvaliados : p.modo === "quedas_seguidas" ? p.quedasSeguidas : 1;
+  const desdeReneg = inicioDaJanela(ctx.mesAtual, mesesOlhados + 1);
+  const renegociou = ctx.cobrancas.some((c) => {
+    const ref = c.dueDate ?? c.emissionDate;
+    return c.status === "negotiated" && !!ref && ref >= desdeReneg;
+  });
+  if (renegociou) {
+    return {
+      ...base,
+      estado: "AMBIGUO",
+      motivo: "Renegociou cobranças no período avaliado — a receita desses meses mostra a troca de cobrança, não o que o cliente contratou. Não dá para afirmar queda.",
+    };
+  }
+
+  if (p.modo === "queda_sustentada") {
+    const r = quedaSustentada({
+      serie: ctx.serie,
+      mesesAvaliados: p.mesesAvaliados,
+      mesesDeBase: p.mesesDeBase,
+      limiarPct: p.limiarPct,
+      mesEmCurso: ctx.receitaMesEmCurso,
+    });
+    if (r.semBase === "SERIE_CURTA") {
+      return { ...base, estado: "DADO_INDISPONIVEL", motivo: `Menos de ${p.mesesAvaliados + 3} meses fechados — não há base para comparar.` };
+    }
+    if (r.semBase === "BASE_ZERO") {
+      return { ...base, estado: "NAO_APLICAVEL", motivo: "Sem receita típica nos meses de base (mediana zero) — não existe base, e zero depois de zero não é queda." };
+    }
+    const baseTxt = formatBRL(r.base!);
+    if (r.disparou) {
+      return {
+        ...base,
+        estado: "ATIVO",
+        motivo: `${r.avaliados.join(" e ")} abaixo de ${100 - p.limiarPct}% do normal (mediana de ${baseTxt}); em média ${num(r.variacaoPct!)}%.`,
+        evidencia: `${num(r.variacaoPct!)}% por ${r.avaliados.length} meses`,
+      };
+    }
+    return {
+      ...base,
+      estado: "NAO_APLICAVEL",
+      motivo: r.desmentidoPeloMesEmCurso
+        ? `${r.avaliados.join(" e ")} vieram abaixo do normal, mas o mês em curso já passou de ${100 - p.limiarPct}% da mediana (${baseTxt}) — era calendário de cobrança, não queda.`
+        : `Não ficou ${r.avaliados.length} meses seguidos abaixo de ${100 - p.limiarPct}% da mediana (${baseTxt}).`,
+    };
+  }
 
   if (p.modo === "quedas_seguidas") {
     const queda = quedaMesAMes({

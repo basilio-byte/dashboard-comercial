@@ -3,6 +3,8 @@ import { getEnv } from "@/lib/env";
 import { atender, INFO_SERVIDOR, VERSAO_PROTOCOLO, textoDeErro, ERRO } from "@/lib/mcp/protocolo";
 import { FERRAMENTAS, RESUMO_DAS_FERRAMENTAS } from "@/lib/mcp/servidor";
 import type { ContextoMcp } from "@/lib/mcp/tipos";
+import { autenticarTokenMcp, existeTokenPessoalAtivo } from "@/lib/mcp/tokens";
+import { PREFIXO_TOKEN } from "@/lib/mcp/token-formato";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,9 +18,15 @@ export const maxDuration = 300;
  *     https://SEU-DOMINIO/api/mcp \
  *     --header "Authorization: Bearer $MCP_TOKEN"
  *
- * ⚠ **Sem `MCP_TOKEN` a rota responde 503, não 200.** Um deploy que esquece a
- * variável não pode virar um endpoint anônimo com escrita no banco e consumo do
- * rate limit compartilhado do Conexa. Mesma postura da rota de sync.
+ * ⚠ **Dois tipos de token, desde 2026-09-18:**
+ *  - **pessoal** (`shc_…`), criado em Minha conta. O rastro de auditoria diz
+ *    QUEM fez, o escopo pode ser só leitura, e revogar um não derruba os outros;
+ *  - **master**, o `MCP_TOKEN` do ambiente — mantido a pedido do dono para o
+ *    desenvolvimento. Acesso total, e aparece no rastro como `mcp:master`.
+ *
+ * ⚠ **Sem nenhum dos dois configurado, a rota responde 503, não 200.** Um deploy
+ * que esquece a variável não pode virar um endpoint anônimo com escrita no banco
+ * e consumo do rate limit compartilhado do Conexa.
  *
  * ⚠ **Sem SSE.** O transporte "streamable HTTP" do MCP permite o servidor
  * responder por fluxo de eventos; aqui toda resposta é um JSON só. Nenhuma
@@ -34,42 +42,81 @@ function naoAutorizado(motivo: string) {
   );
 }
 
-function autenticar(req: NextRequest): { ok: true; quem: string } | { ok: false; resposta: NextResponse } {
+interface Autenticado {
+  ok: true;
+  /** Vai para `mudancas_de_config.quem`. */
+  quem: string;
+  somenteLeitura: boolean;
+  /** Por que é só leitura, quando for — a mensagem de recusa depende disso. */
+  motivoDaLeitura: "ambiente" | "token" | null;
+  tipo: "master" | "pessoal";
+}
+
+async function autenticar(
+  req: NextRequest,
+): Promise<Autenticado | { ok: false; resposta: NextResponse }> {
   const env = getEnv();
-  if (!env.MCP_TOKEN) {
-    return {
-      ok: false,
-      resposta: NextResponse.json(
-        {
-          jsonrpc: "2.0",
-          id: null,
-          error: {
-            code: ERRO.interno,
-            message:
-              "MCP_TOKEN não configurado — rota desabilitada por segurança. " +
-              "Defina a variável no serviço e reinicie.",
-          },
-        },
-        { status: 503 },
-      ),
-    };
-  }
+  const travaDoAmbiente = env.MCP_SOMENTE_LEITURA === "on";
 
   const cabecalho = req.headers.get("authorization") ?? "";
-  const doHeader = cabecalho.toLowerCase().startsWith("bearer ")
+  const valor = cabecalho.toLowerCase().startsWith("bearer ")
     ? cabecalho.slice(7).trim()
     : req.headers.get("x-mcp-token")?.trim() ?? "";
 
-  if (!doHeader) return { ok: false, resposta: naoAutorizado("Falta o header Authorization: Bearer.") };
-  if (!iguaisEmTempoConstante(doHeader, env.MCP_TOKEN)) {
-    return { ok: false, resposta: naoAutorizado("Token inválido.") };
+  // Rótulo que o CLIENTE declara ("claude-code", "claude-desktop"). Não prova
+  // nada — só distingue, no rastro, de onde veio a chamada da mesma pessoa.
+  const cliente = req.headers.get("x-mcp-cliente")?.trim().slice(0, 40);
+
+  // ── token pessoal ──────────────────────────────────────────────────────
+  if (valor.startsWith(PREFIXO_TOKEN)) {
+    const id = await autenticarTokenMcp(valor);
+    if (!id) return { ok: false, resposta: naoAutorizado("Token inválido, revogado ou de usuário inativo.") };
+    const somenteLeitura = travaDoAmbiente || id.escopo === "LEITURA";
+    return {
+      ok: true,
+      quem: `${id.email} via MCP (${id.nomeDoToken}${cliente ? `, ${cliente}` : ""})`,
+      somenteLeitura,
+      motivoDaLeitura: travaDoAmbiente ? "ambiente" : id.escopo === "LEITURA" ? "token" : null,
+      tipo: "pessoal",
+    };
   }
 
-  // Quem está chamando, para o rastro de auditoria. É declarado pelo cliente e
-  // NÃO é confiável como identidade — serve para distinguir agentes entre si,
-  // não para autorizar. A autorização é o token, e o token não é uma pessoa.
-  const cliente = req.headers.get("x-mcp-cliente")?.trim().slice(0, 60);
-  return { ok: true, quem: `mcp:${cliente || "desconhecido"}` };
+  // ── token master ───────────────────────────────────────────────────────
+  if (!env.MCP_TOKEN) {
+    // Sem master: só token pessoal serve. Se nem pessoal existe, a rota está
+    // fechada de fato — e a mensagem precisa dizer o caminho, não só "não".
+    if (!(await existeTokenPessoalAtivo())) {
+      return {
+        ok: false,
+        resposta: NextResponse.json(
+          {
+            jsonrpc: "2.0",
+            id: null,
+            error: {
+              code: ERRO.interno,
+              message:
+                "Nenhum token configurado — rota fechada. Crie um token pessoal em Minha conta, " +
+                "ou defina MCP_TOKEN (master) no serviço.",
+            },
+          },
+          { status: 503 },
+        ),
+      };
+    }
+    return { ok: false, resposta: naoAutorizado("Use um token pessoal (Minha conta → Tokens do MCP).") };
+  }
+
+  if (!valor) return { ok: false, resposta: naoAutorizado("Falta o header Authorization: Bearer.") };
+  if (!iguaisEmTempoConstante(valor, env.MCP_TOKEN)) {
+    return { ok: false, resposta: naoAutorizado("Token inválido.") };
+  }
+  return {
+    ok: true,
+    quem: `mcp:master${cliente ? ` (${cliente})` : ""}`,
+    somenteLeitura: travaDoAmbiente,
+    motivoDaLeitura: travaDoAmbiente ? "ambiente" : null,
+    tipo: "master",
+  };
 }
 
 /**
@@ -86,7 +133,7 @@ function iguaisEmTempoConstante(a: string, b: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = autenticar(req);
+  const auth = await autenticar(req);
   if (!auth.ok) return auth.resposta;
 
   let corpo: unknown;
@@ -99,7 +146,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const somenteLeitura = getEnv().MCP_SOMENTE_LEITURA === "on";
+  const somenteLeitura = auth.somenteLeitura;
   const ferramentas = somenteLeitura ? FERRAMENTAS.filter((f) => f.somenteLeitura) : FERRAMENTAS;
 
   const contexto: ContextoMcp = { quem: auth.quem, origem: "MCP" };
@@ -124,8 +171,11 @@ export async function POST(req: NextRequest) {
       jsonrpc: "2.0",
       id: (corpo as { id?: string | number }).id ?? null,
       result: textoDeErro(
-        `A ferramenta "${nome}" escreve, e este servidor está com MCP_SOMENTE_LEITURA=on. ` +
-          "Peça a quem administra o serviço para desligar a trava, ou use a tela do painel.",
+        auth.motivoDaLeitura === "token"
+          ? `A ferramenta "${nome}" escreve, e o seu token é SOMENTE LEITURA. ` +
+              "Crie um token com escopo de escrita em Minha conta, ou use a tela do painel."
+          : `A ferramenta "${nome}" escreve, e este servidor está com MCP_SOMENTE_LEITURA=on. ` +
+              "Peça a quem administra o serviço para desligar a trava, ou use a tela do painel.",
       ),
     });
   }
@@ -151,9 +201,8 @@ function ehChamadaDeEscrita(msg: unknown): boolean {
  * costuma ser alguém colando a URL no navegador.
  */
 export async function GET(req: NextRequest) {
-  const auth = autenticar(req);
-  const env = getEnv();
-  const somenteLeitura = env.MCP_SOMENTE_LEITURA === "on";
+  const auth = await autenticar(req);
+  const somenteLeitura = auth.ok ? auth.somenteLeitura : false;
   // ⚠ A lista precisa ser a MESMA que `tools/list` devolve. Um cartão de visita
   // que anuncia 31 ferramentas enquanto o protocolo entrega 18 manda quem está
   // integrando procurar defeito no cliente dele.
@@ -166,6 +215,10 @@ export async function GET(req: NextRequest) {
       protocolo: VERSAO_PROTOCOLO,
       transporte: "http (JSON-RPC, sem SSE)",
       autenticado: auth.ok,
+      // Quem o servidor acha que você é — o jeito mais rápido de conferir se o
+      // token certo está configurado no cliente.
+      identidade: auth.ok ? auth.quem : undefined,
+      tipoDeToken: auth.ok ? auth.tipo : undefined,
       somenteLeitura,
       ferramentas: auth.ok ? expostas : undefined,
       comoUsar:

@@ -10,12 +10,17 @@ import {
   marcoAtingido,
   quedaContraBase,
   quedaMesAMes,
+  quedaSustentada,
   ehHoraAvulsa,
+  mudancaDeContrato,
+  situacaoFinanceira,
   temEvidenciaDeCota,
   usoAvulsoAlto,
+  type CobrancaParaFreio,
+  type ContratoParaValor,
 } from "./familias";
 import { carregarGatilhos, type GatilhoResolvido } from "./config";
-import { lerParams } from "./catalogo";
+import { FAMILIAS_DE_VENDA, lerParams } from "./catalogo";
 import { carregarSegmentos } from "./segmentos";
 
 /**
@@ -89,6 +94,14 @@ export interface FilaDeSinais {
   desligadas: Array<{ regra: string; nome: string }>;
   /** Quantos gatilhos efetivamente rodaram. "Fila vazia" só é legível com isto. */
   avaliados: number;
+  /**
+   * Sinais de VENDA que dispariam e foram suspensos pelo freio de inadimplência.
+   * Fica visível: um freio que some com ofertas em silêncio é indistinguível de
+   * uma regra quebrada.
+   */
+  suspensosPeloFreio: number;
+  /** Clientes SEM contrato vigente analisados para "perdeu o contrato". */
+  semContratoAnalisados: number;
 }
 
 const fmtH = (v: { toFixed: (n: number) => string }) =>
@@ -155,9 +168,55 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       planConexaId: true,
       startDate: true,
       hourPlanQuotaRaw: true,
+      amount: true,
+      paymentFrequency: true,
+      endDate: true,
+      isActive: true,
     },
   });
   const idsClientes = [...new Set(contratos.map((c) => c.customerConexaId!))];
+
+  // ── Mudança de contrato: os que TERMINARAM na janela ────────────────────
+  //
+  // ⚠ "Perdeu o contrato" olha exatamente quem saiu da base elegível — o
+  // cliente sem contrato vigente não está em `porCliente`. Então esta família
+  // tem população própria: quem teve contrato encerrado na janela, segue ativo
+  // e não bloqueado no Conexa, e não tem outro vigente. Medido em 2026-09-18:
+  // 28 dos 29 que perderam contrato em 45 dias continuam ativos no Conexa.
+  const gatilhosDeContrato = ligados.filter((g) => g.familia === "MUDANCA_CONTRATO");
+  const maiorJanela = Math.max(
+    0,
+    ...gatilhosDeContrato.map((g) => lerParams("MUDANCA_CONTRATO", g.params).params.janelaDias),
+  );
+  const inicioJanelaContrato = new Date(hoje);
+  inicioJanelaContrato.setUTCDate(inicioJanelaContrato.getUTCDate() - maiorJanela);
+  const encerrados = maiorJanela
+    ? await prisma.contract.findMany({
+        where: {
+          customerConexaId: { not: null },
+          endDate: { gt: inicioJanelaContrato, lte: hoje },
+        },
+        select: {
+          conexaId: true,
+          customerConexaId: true,
+          amount: true,
+          paymentFrequency: true,
+          startDate: true,
+          endDate: true,
+          isActive: true,
+        },
+      })
+    : [];
+  const vigentes = new Set(idsClientes);
+  const idsSemContrato = [
+    ...new Set(encerrados.map((c) => c.customerConexaId!).filter((id) => !vigentes.has(id))),
+  ];
+  const semContratoElegiveis = idsSemContrato.length
+    ? await prisma.customer.findMany({
+        where: { conexaId: { in: idsSemContrato }, isActive: true, isBlocked: false },
+        select: { conexaId: true, name: true },
+      })
+    : [];
 
   const [elegiveis, planos, categorias] = await Promise.all([
     prisma.customer.findMany({
@@ -169,7 +228,9 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     }),
     prisma.serviceCategory.findMany({ select: { conexaId: true, name: true } }),
   ]);
-  const nomePor = new Map(elegiveis.map((c) => [c.conexaId, c.name]));
+  const nomePor = new Map(
+    [...elegiveis, ...semContratoElegiveis].map((c) => [c.conexaId, c.name] as const),
+  );
   const planoPor = new Map(planos.map((p) => [p.conexaId, p]));
   const catPor = new Map(categorias.map((c) => [c.conexaId, c.name ?? ""]));
   const categoriaDo = (planConexaId: number | null) => {
@@ -205,7 +266,12 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       .map((g) => Number((g.params as { mesesDeEvidenciaDeCota?: number }).mesesDeEvidenciaDeCota ?? 3)),
   );
   const inicioEvidencia = inicioDaJanela(mesAtual, mesesDeEvidencia);
-  const [reservasDoMes, abatidas, primeiras, mensais, perfis, contatos] = await Promise.all([
+  const idsSemContratoElegiveis = semContratoElegiveis.map((c) => c.conexaId);
+  const todos = [...alvos, ...idsSemContratoElegiveis];
+  const umAnoAtras = new Date(hoje);
+  umAnoAtras.setUTCDate(umAnoAtras.getUTCDate() - 400);
+
+  const [reservasDoMes, abatidas, primeiras, mensais, perfis, contatos, cobrancasBrutas] = await Promise.all([
     prisma.roomBooking.findMany({
       where: {
         customerConexaId: { in: alvos },
@@ -232,20 +298,40 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       _min: { dataLocal: true },
     }),
     prisma.customerMonthlyRevenue.findMany({
-      where: { customerConexaId: { in: alvos }, mesKey: { in: ultimosMesesFechados(12) } },
+      // O mês em curso entra: ele só pode DESMENTIR uma queda, nunca criar.
+      where: {
+        customerConexaId: { in: alvos },
+        mesKey: { in: [...ultimosMesesFechados(12), mesAtual] },
+      },
       select: { customerConexaId: true, mesKey: true, receita: true },
     }),
     prisma.customerProfile.findMany({
-      where: { customerConexaId: { in: alvos } },
+      where: { customerConexaId: { in: todos } },
       select: { customerConexaId: true, receitaAnoCorrente: true, segmentos: true },
     }),
     // ⚠ Sugestão do Diego: sem o último contato, a fila mostra o mesmo cliente
     // todo dia, inclusive para quem já ligou ontem — e o vendedor aprende a
     // ignorá-la. É assim que uma ferramenta de recomendação morre.
     prisma.contato.findMany({
-      where: { customerConexaId: { in: alvos } },
+      where: { customerConexaId: { in: todos } },
       orderBy: { contatoEm: "desc" },
       select: { customerConexaId: true, contatoEm: true, quem: true, resultado: true },
+    }),
+    // O freio e a tendência precisam das cobranças vencidas e renegociadas.
+    prisma.charge.findMany({
+      where: {
+        customerConexaId: { in: todos },
+        status: { in: ["unpaid", "negotiated"] },
+        OR: [{ dueDate: { gte: umAnoAtras } }, { emissionDate: { gte: umAnoAtras } }],
+      },
+      select: {
+        customerConexaId: true,
+        status: true,
+        dueDate: true,
+        emissionDate: true,
+        amount: true,
+        currentAmount: true,
+      },
     }),
   ]);
 
@@ -294,12 +380,71 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     primeiras.filter((g) => g.customerConexaId !== null).map((g) => [g.customerConexaId!, g._min.dataLocal]),
   );
   const seriePor = new Map<number, Array<{ mesKey: string; valor: ReturnType<typeof money> }>>();
+  const emCursoPor = new Map<number, ReturnType<typeof money>>();
   for (const m of mensais) {
+    if (m.mesKey === mesAtual) {
+      emCursoPor.set(m.customerConexaId, money(m.receita.toString()));
+      continue;
+    }
     const l = seriePor.get(m.customerConexaId) ?? [];
     l.push({ mesKey: m.mesKey, valor: money(m.receita.toString()) });
     seriePor.set(m.customerConexaId, l);
   }
   const perfilPor = new Map(perfis.map((p) => [p.customerConexaId, p]));
+
+  const cobrancasPor = new Map<number, CobrancaParaFreio[]>();
+  for (const c of cobrancasBrutas) {
+    if (c.customerConexaId === null) continue;
+    const l = cobrancasPor.get(c.customerConexaId) ?? [];
+    l.push({
+      status: c.status,
+      dueDate: c.dueDate,
+      emissionDate: c.emissionDate,
+      valor: money((c.currentAmount ?? c.amount).toString()),
+    });
+    cobrancasPor.set(c.customerConexaId, l);
+  }
+
+  /** Mesma função da ficha. Qualquer freio ligado que acione basta. */
+  const freios = ligados.filter((g) => g.familia === "SAUDE_FINANCEIRA");
+  const freiado = (id: number) =>
+    freios.some((g) => {
+      const pf = lerParams("SAUDE_FINANCEIRA", g.params).params;
+      return situacaoFinanceira({ cobrancas: cobrancasPor.get(id) ?? [], hoje, ...pf }).freiar;
+    });
+  const freioPor = new Map<number, boolean>();
+  const estaFreiado = (id: number) => {
+    if (!freioPor.has(id)) freioPor.set(id, freiado(id));
+    return freioPor.get(id)!;
+  };
+
+  const renegociouDesde = (id: number, desde: Date) =>
+    (cobrancasPor.get(id) ?? []).some((c) => {
+      const ref = c.dueDate ?? c.emissionDate;
+      return c.status === "negotiated" && !!ref && ref >= desde;
+    });
+
+  const paraValor = (c: {
+    conexaId: number;
+    amount: { toString(): string };
+    paymentFrequency: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+    isActive: boolean;
+  }): ContratoParaValor => ({
+    conexaId: c.conexaId,
+    amount: money(c.amount.toString()),
+    paymentFrequency: c.paymentFrequency,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    isActive: c.isActive,
+  });
+  const encerradosPor = new Map<number, ContratoParaValor[]>();
+  for (const c of encerrados) {
+    const l = encerradosPor.get(c.customerConexaId!) ?? [];
+    l.push(paraValor(c));
+    encerradosPor.set(c.customerConexaId!, l);
+  }
   const contatoPor = new Map<number, UltimoContato>();
   for (const c of contatos) {
     // Vêm ordenados por data desc: o primeiro de cada cliente é o mais recente.
@@ -314,7 +459,15 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
 
   // ── Avaliação, em memória ───────────────────────────────────────────────
   const itens: ItemDaFila[] = [];
-  const add = (id: number, g: GatilhoResolvido, evidencia: string, peso: number) =>
+  let suspensosPeloFreio = 0;
+  const add = (id: number, g: GatilhoResolvido, evidencia: string, peso: number) => {
+    // ⚠ Oferta de VENDA para quem está devendo é a conversa errada. Os sinais
+    // de saída (tendência, mudança de contrato) passam: com quem está saindo a
+    // conversa acontece mesmo com dívida.
+    if (FAMILIAS_DE_VENDA.has(g.familia) && estaFreiado(id)) {
+      suspensosPeloFreio++;
+      return;
+    }
     itens.push({
       customerConexaId: id,
       nome: nomePor.get(id) ?? null,
@@ -325,6 +478,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       evidencia,
       peso,
     });
+  };
 
   const porFamilia = (f: string) => ligados.filter((g) => g.familia === f);
 
@@ -402,6 +556,29 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     const serie = (seriePor.get(id) ?? []).sort((a, b) => a.mesKey.localeCompare(b.mesKey));
     for (const g of porFamilia("TENDENCIA")) {
       const p = lerParams("TENDENCIA", g.params).params;
+      // Renegociou no período: a receita mostra a troca de cobrança, não o que
+      // o cliente contratou. Na ficha é AMBIGUO; na fila, simplesmente não entra.
+      const olhados = p.modo === "queda_sustentada" ? p.mesesAvaliados : p.modo === "quedas_seguidas" ? p.quedasSeguidas : 1;
+      if (renegociouDesde(id, inicioDaJanela(mesAtual, olhados + 1))) continue;
+
+      if (p.modo === "queda_sustentada") {
+        const r = quedaSustentada({
+          serie,
+          mesesAvaliados: p.mesesAvaliados,
+          mesesDeBase: p.mesesDeBase,
+          limiarPct: p.limiarPct,
+          mesEmCurso: emCursoPor.get(id) ?? null,
+        });
+        if (r.disparou && r.variacaoPct !== null) {
+          add(
+            id,
+            g,
+            `${r.variacaoPct.toFixed(1).replace(".", ",")}% por ${r.avaliados.length} meses`,
+            g.peso + Math.abs(r.variacaoPct),
+          );
+        }
+        continue;
+      }
       if (p.modo === "quedas_seguidas") {
         const q = quedaMesAMes({ serie, quedasSeguidas: p.quedasSeguidas, quedaMinimaPct: p.quedaMinimaPct });
         if (q.disparou) add(id, g, `${q.quedas} quedas seguidas`, g.peso + q.quedas * 5);
@@ -418,6 +595,34 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
           g.peso + Math.abs(pc.variacaoPct),
         );
       }
+    }
+  }
+
+  // ── MUDANCA_CONTRATO ────────────────────────────────────────────────────
+  const avaliarContrato = (id: number, contratosDoCliente: ContratoParaValor[]) => {
+    for (const g of gatilhosDeContrato) {
+      const p = lerParams("MUDANCA_CONTRATO", g.params).params;
+      const r = mudancaDeContrato({ contratos: contratosDoCliente, hoje, janelaDias: p.janelaDias, limiarPct: p.limiarPct });
+      if (p.modo === "perdeu" && r.perdeu) {
+        const quando = r.encerrado!.endDate!.toISOString().slice(0, 10).split("-").reverse().join("/");
+        add(id, g, `saiu em ${quando}, tinha ${fmtBRL(r.antes)}/mês`, g.peso + Math.min(50, Number(r.antes ?? 0) / 20));
+      }
+      if (p.modo === "reduziu" && r.reduziu) {
+        add(
+          id,
+          g,
+          `${fmtBRL(r.antes)} → ${fmtBRL(r.agora)}/mês (${r.variacaoPct!.toFixed(0)}%)`,
+          g.peso + Math.abs(r.variacaoPct!) / 2,
+        );
+      }
+    }
+  };
+  if (gatilhosDeContrato.length) {
+    for (const [id, lista] of porCliente) {
+      avaliarContrato(id, [...lista.map(paraValor), ...(encerradosPor.get(id) ?? [])]);
+    }
+    for (const id of idsSemContratoElegiveis) {
+      avaliarContrato(id, encerradosPor.get(id) ?? []);
     }
   }
 
@@ -489,7 +694,10 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     porRegra,
     bloqueadas,
     desligadas,
-    avaliados: ligados.length,
+    // O freio não gera sinal — só suspende —, então não conta como "gatilho avaliado".
+    avaliados: ligados.filter((g) => g.familia !== "SAUDE_FINANCEIRA").length,
+    suspensosPeloFreio,
+    semContratoAnalisados: idsSemContratoElegiveis.length,
   };
 }
 
@@ -497,4 +705,8 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
 function inicioDaJanela(mesAtual: string, meses: number): Date {
   const [a, m] = mesAtual.split("-").map(Number);
   return new Date(Date.UTC(a!, m! - 1 - (Math.max(1, meses) - 1), 1));
+}
+
+function fmtBRL(v: { toString(): string } | null): string {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(v?.toString() ?? 0));
 }

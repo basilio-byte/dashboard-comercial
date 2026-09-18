@@ -382,3 +382,19 @@ describe("faturada — status medidos em 2026-09-18", () => {
     expect(faturada({ status: "deductedFromQuota" })).toBe(false);
   });
 });
+
+describe("faturada — a fatura do mês seguinte (medido 2026-09-18)", () => {
+  it("⚠ notBilled COM venda de valor é hora faturada: é o excedente cobrado no mês seguinte", () => {
+    // 219h assim em agosto, contra 119h que o excedente enxergava.
+    expect(faturada({ status: "notBilled", valorDaVenda: 95 })).toBe(true);
+  });
+
+  it("notBilled sem venda, ou com venda zero, continua fora — é cortesia ou lacuna", () => {
+    expect(faturada({ status: "notBilled", valorDaVenda: 0 })).toBe(false);
+    expect(faturada({ status: "notBilled", valorDaVenda: null })).toBe(false);
+  });
+
+  it("sem o valor carregado, o comportamento antigo se mantém", () => {
+    expect(faturada({ status: "notBilled" })).toBe(false);
+  });
+});

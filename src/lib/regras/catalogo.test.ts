@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CODIGOS_NATIVOS, FAMILIAS, NATIVOS, lerParams, novoCodigo, paramsPorFamilia } from "./catalogo";
+import { CODIGOS_NATIVOS, FAMILIAS, FAMILIAS_DE_VENDA, NATIVOS, lerParams, novoCodigo, paramsPorFamilia } from "./catalogo";
 
 /**
  * ⚠ O teste mais importante deste arquivo é o primeiro: os defaults do catálogo
@@ -77,5 +77,23 @@ describe("catálogo de gatilhos", () => {
 
   it("código gerado não colide com nativo", () => {
     for (let i = 0; i < 50; i++) expect(CODIGOS_NATIVOS.has(novoCodigo())).toBe(false);
+  });
+
+  it("⚠ o freio suspende VENDA, nunca sinal de saída", () => {
+    // Com quem está saindo, a conversa acontece mesmo com dívida.
+    expect(FAMILIAS_DE_VENDA.has("TENDENCIA")).toBe(false);
+    expect(FAMILIAS_DE_VENDA.has("MUDANCA_CONTRATO")).toBe(false);
+    expect(FAMILIAS_DE_VENDA.has("SAUDE_FINANCEIRA")).toBe(false);
+    expect(FAMILIAS_DE_VENDA.has("MARCO_CONTRATO")).toBe(true);
+    expect(FAMILIAS_DE_VENDA.has("EXCEDENTE")).toBe(true);
+  });
+
+  it("os sinais de saída e o freio existem como nativos", () => {
+    for (const c of ["contrato-perdido", "contrato-reduzido", "freio"]) {
+      expect(CODIGOS_NATIVOS.has(c), `falta ${c}`).toBe(true);
+    }
+    // A métrica virou queda sustentada — a versão de mês isolado não volta.
+    const metrica = NATIVOS.find((n) => n.codigo === "métrica")!;
+    expect(metrica.params.modo).toBe("queda_sustentada");
   });
 });

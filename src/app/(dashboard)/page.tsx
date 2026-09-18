@@ -161,6 +161,23 @@ export default async function Radar({
             </strong>
             , gerando {fila.itens.length.toLocaleString("pt-BR")} sinais em{" "}
             {fila.clientes.length.toLocaleString("pt-BR")} clientes.
+            {fila.semContratoAnalisados > 0 ? (
+              <>
+                {" "}
+                Mais {fila.semContratoAnalisados} que perderam o contrato recentemente, olhados à parte
+                — eles já não fazem parte da base com contrato.
+              </>
+            ) : null}
+            {fila.suspensosPeloFreio > 0 ? (
+              <>
+                {" "}
+                <strong>
+                  {fila.suspensosPeloFreio}{" "}
+                  {fila.suspensosPeloFreio === 1 ? "oferta de venda suspensa" : "ofertas de venda suspensas"}
+                </strong>{" "}
+                pelo freio de cobrança em atraso — o motivo aparece na ficha de cada cliente.
+              </>
+            ) : null}
           </Nota>
         </Secao>
 

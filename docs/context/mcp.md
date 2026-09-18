@@ -15,21 +15,40 @@ consultar, operar e **editar** a plataforma de dentro de uma conversa.
 
 ```
 POST /api/mcp
-Authorization: Bearer $MCP_TOKEN
+Authorization: Bearer <token>
 ```
+
+**Dois tipos de token, desde 2026-09-18:**
+
+| | Token pessoal (`shc_…`) | Token master (`MCP_TOKEN`) |
+|---|---|---|
+| Onde nasce | **Minha conta → Tokens do MCP** | variável de ambiente |
+| Quem aparece no rastro | `diego@… via MCP (nome do token)` | `mcp:master` |
+| Escopo | somente leitura **ou** leitura e escrita | total |
+| Revogação | um a um, pelo dono ou por um admin | trocar a variável |
+| Para quem | o time | desenvolvimento |
+
+O token pessoal é mostrado **uma vez**. O banco guarda só o SHA-256 — nem ele
+sabe qual é o token. Perdeu? Revogue e crie outro.
+
+A pessoa é conferida **a cada chamada**: usuário desativado derruba os tokens
+dele na hora, e quem vira VIEWER perde a escrita pelo MCP no mesmo instante,
+mesmo com token criado como escrita. Nenhuma ferramenta do MCP cria token: um
+token vazado não pode emitir outros.
 
 - **JSON-RPC 2.0 sobre HTTP, sem estado e sem SSE.** Cada requisição carrega
   tudo o que precisa; nenhuma sessão fica presa a uma réplica.
-- **`MCP_TOKEN` vazio ⇒ 503.** A rota nasce fechada. Um deploy que esquece a
-  variável não vira endpoint anônimo com escrita no banco e consumo do rate
-  limit compartilhado do Conexa. É a mesma postura de `CRON_SECRET`.
+- **Sem master e sem token pessoal ativo ⇒ 503.** A rota nasce fechada. Um
+  deploy que esquece a variável não vira endpoint anônimo com escrita no banco
+  e consumo do rate limit compartilhado do Conexa.
 - **`MCP_SOMENTE_LEITURA=on`** remove toda ferramenta de escrita de
   `tools/list` *e* recusa a chamada direta com um motivo legível.
 - `GET /api/mcp` com o token devolve um cartão de visita (lista de ferramentas
   e como registrar). Sem token, 401.
 
-O token **não é uma pessoa**. O header opcional `x-mcp-cliente` só rotula quem
-chamou, para o rastro de auditoria — não autoriza nada.
+O header opcional `x-mcp-cliente` só rotula DE ONDE veio a chamada ("claude-code",
+"claude-desktop") — não autoriza nada. Quem autoriza é o token, e o token
+pessoal é que diz quem é a pessoa.
 
 ## Registrar
 
@@ -44,7 +63,8 @@ Produção: **`https://seahub-dashboard-comercial.rockwe.easypanel.host/api/mcp`
 > interceptável.
 
 Cada pessoa registra com o **próprio** token, no escopo `local` — o token fica no
-`~/.claude.json` dela, fora do repositório:
+`~/.claude.json` dela, fora do repositório. A tela **Minha conta** mostra o
+comando já montado, com o token, no momento da criação:
 
 ```bash
 claude mcp add --transport http --scope local seahub-comercial \
