@@ -244,6 +244,32 @@ export function temEvidenciaDeCota(p: {
   );
 }
 
+/**
+ * A reserva é HORA AVULSA — o cliente paga por ela, fora de qualquer cota?
+ *
+ * ⚠ **Corrigido em 2026-09-18, no mesmo dia da primeira versão.** A primeira
+ * versão usava o STATUS da reserva (billed / paid / partiallyPaid) e tratava
+ * `notBilled` como "não cobrada". Medido depois: a partir de agosto de 2026 a
+ * Seahub passou a cobrar sala numa fatura CONSOLIDADA do mês seguinte — as
+ * vendas de agosto estão em cobranças que vencem de 9 a 25 de setembro, R$ 9,4
+ * mil já pagos —, e o Conexa mantém a reserva como `notBilled` mesmo assim.
+ * Resultado: todo uso avulso do mês corrente parecia "não cobrado", e a regra
+ * 4 zerou. Pelo critério certo, 4 clientes; pelo errado, nenhum.
+ *
+ * O critério certo é o que a reserva CUSTA, não o estado da cobrança: tem venda
+ * ligada com valor e não foi abatida da cota. Venda de valor zero é cortesia —
+ * esse é o único caso em que o cliente de fato não paga pela hora.
+ */
+export function ehHoraAvulsa(r: {
+  status?: string | null;
+  /** Valor da venda ligada à reserva (`saleConexaId`). `null` = sem venda. */
+  valorDaVenda: number | null;
+}): boolean {
+  if (r.status === "deductedFromQuota") return false;
+  if (r.status === "cancelled" || r.status === "billedCancelled") return false;
+  return r.valorDaVenda !== null && r.valorDaVenda > 0;
+}
+
 // ---------------------------------------------------------------------------
 // PRIMEIRO_EVENTO — regra 5
 // ---------------------------------------------------------------------------

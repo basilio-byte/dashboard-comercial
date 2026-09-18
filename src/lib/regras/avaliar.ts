@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { keyToUtcDate, todayKey, currentMonthKey, ultimosMesesFechados } from "@/lib/dates";
 import { formatBRL, money, type Money } from "@/lib/money";
 import { horasDoCliente, type HorasDoCliente } from "@/lib/intel/horas";
-import { faturada } from "@/lib/metrics/horas";
 import {
   litoralReservouSala,
   marcoAtingido,
@@ -11,6 +10,7 @@ import {
   primeiraReserva,
   quedaContraBase,
   quedaMesAMes,
+  ehHoraAvulsa,
   temEvidenciaDeCota,
   usoAvulsoAlto,
 } from "./familias";
@@ -99,10 +99,8 @@ interface ContextoDoCliente {
   /** Todas as horas reservadas no mês corrente, qualquer status. */
   horasNoMes: Money;
   /**
-   * Só as horas FATURADAS como avulso no mês (billed, paid, partiallyPaid).
-   * É o que a regra 4 quer dizer com "compra hora avulsa": quem tem reserva
-   * `notBilled` não está pagando por hora, e a oferta "pacote sai mais barato
-   * que avulso" não se aplica a ele.
+   * Horas AVULSAS no mês: reserva com venda de valor, fora da cota — cobrada na
+   * hora ou na fatura do mês seguinte. Ver `ehHoraAvulsa`.
    */
   horasAvulsasNoMes: Money;
   reservasNoMes: number;
@@ -140,7 +138,7 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     }),
     prisma.roomBooking.findMany({
       where: { customerConexaId, isActive: true, cancellationReason: null },
-      select: { dataLocal: true, horas: true, status: true },
+      select: { dataLocal: true, horas: true, status: true, saleConexaId: true },
       orderBy: { dataLocal: "asc" },
     }),
     prisma.customerMonthlyRevenue.findMany({
@@ -173,8 +171,24 @@ export async function sinaisDoCliente(customerConexaId: number): Promise<Sinal[]
     (b) => b.dataLocal && b.dataLocal.toISOString().slice(0, 7) === mesAtual,
   );
   const horasNoMes = doMes.reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
+  // O valor da venda de cada reserva do mês — é o que diz se a hora é paga.
+  const idsDeVenda = [...new Set(doMes.map((b) => b.saleConexaId).filter((x): x is number => x !== null))];
+  const valorDaVenda = new Map(
+    (idsDeVenda.length
+      ? await prisma.sale.findMany({
+          where: { conexaId: { in: idsDeVenda } },
+          select: { conexaId: true, amount: true },
+        })
+      : []
+    ).map((v) => [v.conexaId, Number(v.amount)]),
+  );
   const horasAvulsasNoMes = doMes
-    .filter((b) => faturada({ status: b.status }))
+    .filter((b) =>
+      ehHoraAvulsa({
+        status: b.status,
+        valorDaVenda: b.saleConexaId !== null ? valorDaVenda.get(b.saleConexaId) ?? null : null,
+      }),
+    )
     .reduce((acc, b) => acc.plus(money(b.horas?.toString() ?? 0)), money(0));
   const reservasNoMes = doMes.length;
   const evidenciaDeCota = (meses: number) =>
@@ -443,7 +457,7 @@ function usoSemCota(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Si
     return {
       ...base,
       estado: "ATIVO",
-      motivo: `Sem cota e ${h(ctx.horasAvulsasNoMes)} faturadas como avulso em ${ctx.mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
+      motivo: `Sem cota e ${h(ctx.horasAvulsasNoMes)} pagas como avulso em ${ctx.mesAtual}. ⚠ A economia vs. avulso não sai: a API não expõe preço por hora.`,
       evidencia: `${h(ctx.horasAvulsasNoMes)} avulsas no mês`,
     };
   }
@@ -456,9 +470,9 @@ function usoSemCota(g: GatilhoResolvido, ctx: ContextoDoCliente, base: Base): Si
       ? "Tem contrato com cota — este gatilho é para quem só compra avulso."
       : cotaPorEvidencia
         ? `Tem reserva abatida da cota nos últimos ${p.mesesDeEvidenciaDeCota} meses — já tem pacote de horas, não é cliente de avulso.`
-        : naoFaturadas.greaterThan(0)
-          ? `${h(ctx.horasAvulsasNoMes)} faturadas como avulso em ${ctx.mesAtual}; outras ${h(naoFaturadas)} reservadas não são cobradas — não é compra avulsa.`
-          : `${h(ctx.horasAvulsasNoMes)} faturadas como avulso no mês, abaixo do limiar de ${p.limiarHoras}h.`,
+        : naoFaturadas.greaterThan(0) && ctx.horasAvulsasNoMes.isZero()
+          ? `As ${h(naoFaturadas)} reservadas em ${ctx.mesAtual} não têm venda com valor — é cortesia, não compra avulsa.`
+          : `${h(ctx.horasAvulsasNoMes)} pagas como avulso no mês, abaixo do limiar de ${p.limiarHoras}h.`,
   };
 }
 

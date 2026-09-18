@@ -69,7 +69,7 @@ export const paramsPorFamilia = {
 
   /** Regra 4 — ">5h no mês sem contrato com cota". */
   USO_SEM_COTA: z.object({
-    /** Horas FATURADAS como avulso no mês (billed, paid, partiallyPaid). */
+    /** Horas AVULSAS no mês: com venda de valor, fora da cota. Ver `ehHoraAvulsa`. */
     limiarHoras: z.number().min(0).max(500).default(5),
     /**
      * Uma reserva abatida da cota nestes últimos meses prova que o cliente tem
@@ -221,7 +221,7 @@ export const NATIVOS: GatilhoNativo[] = [
     peso: 55,
     ordem: 4,
     bloqueio: null,
-    nota: "conta só hora FATURADA como avulso (billed, paid, partiallyPaid) · quem teve reserva abatida da cota nos últimos meses já tem pacote e não entra · a economia vs. avulso NÃO sai: a API não expõe preço por hora por produto",
+    nota: "conta hora com VENDA de valor fora da cota — paga na hora ou na fatura do mês seguinte, que é como a sala é cobrada desde ago/2026 · quem teve reserva abatida da cota nos últimos meses já tem pacote e não entra · a economia vs. avulso NÃO sai: a API não expõe preço por hora",
   },
   {
     codigo: "5",

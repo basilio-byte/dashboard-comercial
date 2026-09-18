@@ -10,6 +10,7 @@ import {
   quedaContraBase,
   quedaMesAMes,
   quedaPercentual,
+  ehHoraAvulsa,
   temEvidenciaDeCota,
   podeOfertar,
   posseDoProduto,
@@ -343,5 +344,34 @@ describe("USO_SEM_COTA e EVENTO_EM_SEGMENTO — evidência de cota (2026-09-18)"
         desde,
       }),
     ).toBe(false);
+  });
+});
+
+describe("USO_SEM_COTA — o que é hora avulsa (corrigido em 2026-09-18)", () => {
+  it("⚠ notBilled COM venda de valor é avulsa — a sala é cobrada na fatura do mês seguinte", () => {
+    // O caso real que a primeira versão errou: 16h em setembro, R$ 1.100 em
+    // vendas, todas `notBilled` porque a cobrança só sai em outubro.
+    expect(ehHoraAvulsa({ status: "notBilled", valorDaVenda: 275 })).toBe(true);
+  });
+
+  it("paga na hora continua sendo avulsa", () => {
+    expect(ehHoraAvulsa({ status: "paid", valorDaVenda: 90 })).toBe(true);
+    expect(ehHoraAvulsa({ status: "partiallyPaid", valorDaVenda: 90 })).toBe(true);
+  });
+
+  it("venda de valor ZERO é cortesia, não compra avulsa", () => {
+    expect(ehHoraAvulsa({ status: "notBilled", valorDaVenda: 0 })).toBe(false);
+  });
+
+  it("abatida da cota nunca é avulsa, mesmo com venda", () => {
+    expect(ehHoraAvulsa({ status: "deductedFromQuota", valorDaVenda: 90 })).toBe(false);
+  });
+
+  it("reserva sem venda ligada não é avulsa — não há preço para afirmar", () => {
+    expect(ehHoraAvulsa({ status: "notBilled", valorDaVenda: null })).toBe(false);
+  });
+
+  it("cobrança cancelada não conta", () => {
+    expect(ehHoraAvulsa({ status: "billedCancelled", valorDaVenda: 90 })).toBe(false);
   });
 });

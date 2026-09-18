@@ -4,6 +4,42 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, tarde — Medido depois do deploy, e uma correção da correção
+
+Deploy de `256807b` confirmado pelos parâmetros novos em `gatilhos_listar`.
+Religados e conferidos linha a linha: **regra 10 de 17 para 7** (os 7 certos),
+**regra 3 de 4 para 1** (GH Engenharia, queda real). A **métrica foi desligada
+de novo**: 14 sinais, uns 5 reais e 4 que eram RENEGOCIAÇÃO — cobranças de
+julho e agosto `negotiated` e uma nova em setembro somando as antigas (Trutto
+114 + 113 + 110 = 337). Base de 6 meses piorou (17). O defeito é avaliar um mês
+isolado no regime de emissão; nenhuma base conserta.
+
+**A regra 4 zerou, e o erro era meu.** A versão das 14h contava como avulsa só
+reserva com status billed/paid, porque eu li `notBilled` como "não cobrada" — e
+escrevi no commit que "nenhum dos seis tinha hora billed/paid, oferecer pacote a
+quem não paga por hora é a oferta errada". Medido depois: **a partir de agosto a
+sala passou a ser cobrada numa fatura consolidada do mês seguinte.** As vendas
+de sala de agosto estão em cobranças que vencem de 9 a 25 de setembro — R$ 9.440
+pagos, R$ 6.716 a vencer —, e o Conexa mantém a reserva como `notBilled`. Todo
+uso avulso do mês corrente parecia "não cobrado". A Igreja Batista Fonte, que eu
+citei como quem "não paga por hora", pagou R$ 1.100 por 16h em setembro.
+
+O critério agora é o que a reserva CUSTA (`ehHoraAvulsa`): venda ligada com valor
+e fora da cota. Venda de valor zero é cortesia. Pelo critério certo, 4 clientes
+em setembro; pelo errado, zero.
+
+O "salto de horas não faturadas" (1h em junho → 406h em agosto) é a mesma
+mudança de processo, não vazamento. Sobram **20 vendas de agosto (R$ 2.262) sem
+cobrança nenhuma** — essas valem conferência do financeiro.
+
+⚠ **Em aberto, não corrigido:** o EXCEDENTE conta hora estourada pelo status
+(`faturada`), e com a fatura do mês seguinte a hora excedente de agosto em diante
+também chega como `notBilled`. Os ciclos a partir de agosto podem estar
+SUBcontando estouro. Precisa de medição antes de mexer — é a parte mais delicada
+do motor.
+
+---
+
 ## 2026-09-18 — A primeira leitura da produção pelo MCP achou a fila cheia de sinais falsos
 
 O MCP foi ligado à produção e a primeira pergunta foi o tamanho do Radar novo.

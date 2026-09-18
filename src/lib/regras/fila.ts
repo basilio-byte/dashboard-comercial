@@ -4,13 +4,13 @@ import { keyToUtcDate, todayKey, currentMonthKey, monthBounds, nowInAppTz, ultim
 import { money } from "@/lib/money";
 import { estadoDoEspelho } from "@/lib/intel/completude";
 import { clientesComExcedente } from "@/lib/intel/horas";
-import { faturada } from "@/lib/metrics/horas";
 import type { ResultadoContato } from "@prisma/client";
 import {
   litoralReservouSala,
   marcoAtingido,
   quedaContraBase,
   quedaMesAMes,
+  ehHoraAvulsa,
   temEvidenciaDeCota,
   usoAvulsoAlto,
 } from "./familias";
@@ -213,7 +213,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
         cancellationReason: null,
         dataLocal: { gte: inicioMes, lt: fimMes },
       },
-      select: { customerConexaId: true, horas: true, status: true },
+      select: { customerConexaId: true, horas: true, status: true, saleConexaId: true },
     }),
     // A evidência de posse de cota — as reservas que o Conexa abateu.
     prisma.roomBooking.findMany({
@@ -249,13 +249,30 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
     }),
   ]);
 
-  // Só hora FATURADA como avulso conta para a regra 4 — é a mesma leitura da
-  // ficha (`avaliar.ts`), com a mesma função.
+  // Só hora AVULSA conta para a regra 4 — venda com valor, fora da cota. É a
+  // mesma leitura da ficha (`avaliar.ts`), com a mesma função.
+  const idsDeVenda = [
+    ...new Set(reservasDoMes.map((b) => b.saleConexaId).filter((x): x is number => x !== null)),
+  ];
+  const valorDaVenda = new Map(
+    (idsDeVenda.length
+      ? await prisma.sale.findMany({
+          where: { conexaId: { in: idsDeVenda } },
+          select: { conexaId: true, amount: true },
+        })
+      : []
+    ).map((v) => [v.conexaId, Number(v.amount)]),
+  );
   const horasAvulsasPor = new Map<number, ReturnType<typeof money>>();
   const reservasNoMesPor = new Map<number, number>();
   for (const b of reservasDoMes) {
     if (b.customerConexaId === null) continue;
-    if (faturada({ status: b.status })) {
+    if (
+      ehHoraAvulsa({
+        status: b.status,
+        valorDaVenda: b.saleConexaId !== null ? valorDaVenda.get(b.saleConexaId) ?? null : null,
+      })
+    ) {
       horasAvulsasPor.set(
         b.customerConexaId,
         (horasAvulsasPor.get(b.customerConexaId) ?? money(0)).plus(money(b.horas?.toString() ?? 0)),
@@ -342,7 +359,7 @@ export async function filaDeSinais(): Promise<FilaDeSinais> {
       const p = lerParams("USO_SEM_COTA", g.params).params;
       const comCota = temCota || evidenciaDeCota(id, p.mesesDeEvidenciaDeCota);
       if (usoAvulsoAlto({ temContratoComCota: comCota, horasNoMes: horas, limiarHoras: p.limiarHoras })) {
-        add(id, g, `${fmtH(horas)} avulsas faturadas no mês`, g.peso + Number(horas) * 2);
+        add(id, g, `${fmtH(horas)} pagas como avulso no mês`, g.peso + Number(horas) * 2);
       }
     }
 
