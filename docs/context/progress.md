@@ -4,6 +4,29 @@ Log cronológico. Mais recente no topo. **Atualizar a cada commit + push.**
 
 ---
 
+## 2026-09-18, depois do deploy de `59261ec` — o expurgo funcionou, e um deploy apagou a receita
+
+**Expurgo conferido.** A API honra `id[]` em cobranças, reservas, vendas e
+contratos (medido com a `conexa_get` já corrigida). A primeira revisita de
+cobranças removeu **37**: jun 1, jul 1, ago 13 — exatamente as que a
+reconciliação tinha apontado — e mais **21 em setembro** e 1 em outubro, meses
+que eu não tinha reconciliado. Amostra de 7 conferida no MCP oficial do
+Conexa: nenhuma existe.
+
+**Freio conferido.** A Tereza saiu do Radar, suspensa pela `denied` vencida.
+
+**Um defeito novo, achado por acaso.** Depois do deploy a métrica caiu de 8
+para 2 sinais. A consolidação de receita APAGAVA os 25 meses de todo mundo e
+regravava em lotes de 500, cada lote numa transação; o deploy matou o processo
+no meio e **2.138 dos 2.998 clientes ficaram sem receita mensal** até a próxima
+execução. Carteira, Top 5 e métrica erradas — e a tela Confiança dizendo
+"receita confiável". Acontecia em TODO reinício durante o ~1,5 min da
+consolidação. Agora regrava primeiro e só depois tira quem sobrou: queda no
+meio deixa valor de meia hora atrás, nunca buraco. Produção foi restaurada na
+hora rodando `intelligence` pelo MCP.
+
+---
+
 ## 2026-09-18, noite — o sistema contra o que ele se propõe
 
 Pedido do dono: *"verificar se a consistência do sistema está adequada ao que ele

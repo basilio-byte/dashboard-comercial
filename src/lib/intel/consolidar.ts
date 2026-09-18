@@ -113,19 +113,30 @@ export async function consolidarReceitaMensal(
     }
   }
 
-  // ⚠ APAGA a janela antes de regravar.
-  //
-  // Sem isto a consolidação é MONOTÔNICA: só escreve para clientes presentes em
-  // `acumulado`, e quem sai (porque a única cobrança do mês foi cancelada) fica
-  // com a linha antiga para sempre. O cliente seguia no Top 5 e no total do ano
-  // com receita que não existe mais — e a reconciliação NÃO pega, porque ela
-  // confere espelho × Conexa e o espelho está certo; errado é o derivado.
-  await prisma.customerMonthlyRevenue.deleteMany({ where: { mesKey: { in: meses } } });
-
   // Em lotes: uma transação com dezenas de milhares de upserts estoura o tempo.
   for (let i = 0; i < ops.length; i += 500) {
     await prisma.$transaction(ops.slice(i, i + 500));
   }
+
+  // ⚠ Remove o que SOBROU — e só DEPOIS de regravar.
+  //
+  // Sem remoção a consolidação é MONOTÔNICA: só escreve para clientes presentes
+  // em `acumulado`, e quem sai (porque a única cobrança do mês foi cancelada)
+  // fica com a linha antiga para sempre — no Top 5 e no total do ano com receita
+  // que não existe mais. A reconciliação não pega: o espelho está certo, errado
+  // é o derivado.
+  //
+  // ⚠ Mas a remoção vinha ANTES da regravação, apagando os 25 meses de todo
+  // mundo e regravando em lotes de 500, cada lote numa transação. Medido em
+  // 2026-09-18: um deploy matou o processo no meio, e 2.138 dos 2.998 clientes
+  // ficaram SEM receita mensal até a execução seguinte — a métrica caiu de 8
+  // para 2 sinais no Radar, a Carteira e o Top 5 erraram, e a tela Confiança
+  // seguia dizendo "receita confiável". Agora a queda no meio deixa valor de
+  // meia hora atrás, nunca buraco: primeiro regrava, depois tira só quem não
+  // está mais em `acumulado`.
+  await prisma.customerMonthlyRevenue.deleteMany({
+    where: { mesKey: { in: meses }, customerConexaId: { notIn: [...acumulado.keys()] } },
+  });
 
   return acumulado.size;
 }
