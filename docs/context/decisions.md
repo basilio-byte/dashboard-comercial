@@ -456,6 +456,38 @@ reintroduz o erro.
   conclusão (sinal de continuidade), não saída.
 - **Peso na fila pelo dinheiro em jogo**, não pela porcentagem.
 
+## ADR-0016 — Acesso se dá pela UI, por gente; o MCP nunca cria usuário
+
+**Contexto.** De 2026-08-26 a 2026-09-30 o painel não teve **nenhuma** forma de
+criar usuário: o administrador nascia do `bootstrap-admin.mjs` a partir das ENV
+no boot, e mais ninguém. A falta era invisível para quem publicou o sistema —
+ele entrava normalmente. O Diego tentou entrar em 30/09 com dois e-mails; as
+quatro tentativas ficaram em `login_events` como "e-mail inexistente", e
+ninguém olhava essa tabela.
+
+**Decisão.**
+1. Tela **Usuários**, só para ADMIN: criar, trocar perfil, desativar, reativar
+   e redefinir senha. A senha aparece **uma vez**, como o token do MCP.
+2. **Nenhuma ferramenta do MCP cria, promove ou reativa usuário** — mesma
+   postura dos tokens pessoais (ADR-0009 e `mcp-do-painel`). Um agente com
+   token de escrita poderia, de outra forma, fabricar um administrador para si.
+   Acesso é decisão de gente, tomada na UI, com rastro em `mudancas_de_config`.
+3. Duas travas puras e testadas (`usuarios-regras.ts`): ninguém desativa nem
+   rebaixa a própria conta, e o **último ADMIN ativo** não pode ser desativado
+   nem rebaixado. Sem elas o painel fica sem ninguém capaz de dar acesso, e a
+   saída é mexer no banco à mão.
+4. Trocar perfil, desativar ou redefinir senha **encerra as sessões** da
+   pessoa. `usuarioAtual()` já conferia `isActive` a cada chamada, mas a troca
+   de PERFIL sobrevivia até a sessão expirar (12h).
+5. A tela mostra **quem tentou entrar e não tem conta** (falha "e-mail
+   inexistente" nos últimos 30 dias), com um clique para criar a conta já com o
+   e-mail que a pessoa usou. É o dado que responde "o Diego não consegue
+   entrar" sem adivinhar o e-mail dele.
+
+**Consequência.** "Usuário" e "Agente" passam a ser duas coisas nomeadas na
+interface: agente é quem aparece em "quem falou com o cliente" e sobrevive à
+saída da pessoa; usuário é login e é revogável no mesmo minuto.
+
 ## ADR-0015 — O espelho remove o que foi apagado no Conexa, com prova por id
 
 **Contexto.** A primeira reconciliação em produção (2026-09-18) deu DIVERGE em

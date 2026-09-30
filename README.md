@@ -144,7 +144,8 @@ os 12 do documento, três sinais de saída (contrato perdido, reduzido, programa
 de cobrança em atraso ·
 **configuração editável pela tela** (limiares, liga-desliga, gatilho novo, classificação de
 categoria, cadastro de agentes) · **servidor MCP** · as telas
-**Radar · Carteira · Gatilhos · Agentes · Confiança · Motor**.
+**Radar · Carteira · Gatilhos · Agentes · Confiança · Motor · Usuários**
+(esta última só para ADMIN).
 
 **Ainda NÃO existe:** camada de disparo (`src/lib/disparo/`). Nenhuma task é criada no ClickUp, e
 essa ausência é estrutural — não é um toggle desligado.

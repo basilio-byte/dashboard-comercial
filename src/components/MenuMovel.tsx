@@ -19,7 +19,7 @@ import { Lateral } from "./Lateral";
  * barra, e a gaveta sai recortada em uma tira no topo, com o conteúdo da
  * página aparecendo por baixo. Foi exatamente o que aconteceu.
  */
-export function MenuMovel({ nome, email }: { nome: string; email?: string }) {
+export function MenuMovel({ nome, email, papel }: { nome: string; email?: string; papel?: string }) {
   const [aberto, setAberto] = useState(false);
   const [montado, setMontado] = useState(false);
   const caminho = usePathname();
@@ -62,7 +62,7 @@ export function MenuMovel({ nome, email }: { nome: string; email?: string }) {
         >
           <X size={16} />
         </button>
-        <Lateral nome={nome} email={email} aoNavegar={() => setAberto(false)} />
+        <Lateral nome={nome} email={email} papel={papel} aoNavegar={() => setAberto(false)} />
       </div>
     </div>
   );

@@ -13,7 +13,15 @@ import { cn } from "@/lib/ui";
  * Radar — onde essa informação estava presa antes. Uma tela de oportunidades
  * sobre dado de ontem manda o vendedor ligar para o cliente errado.
  */
-export async function BarraSuperior({ nome, email }: { nome: string; email?: string }) {
+export async function BarraSuperior({
+  nome,
+  email,
+  papel,
+}: {
+  nome: string;
+  email?: string;
+  papel?: string;
+}) {
   /**
    * ⚠ Filtra por MODO. Sem isso o selo mentia: `consolidarTudo()` abre um run
    * `intelligence` a cada 30 minutos, fecha SUCCESS — e **não fala com o
@@ -40,7 +48,7 @@ export async function BarraSuperior({ nome, email }: { nome: string; email?: str
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-[var(--borda)] bg-[color-mix(in_oklab,var(--plano)_86%,transparent)] px-4 backdrop-blur-md sm:px-6">
-      <MenuMovel nome={nome} email={email} />
+      <MenuMovel nome={nome} email={email} papel={papel} />
 
       {/* No celular não há lateral visível: a marca precisa aparecer aqui — e
           sobre superfície clara, então o logotipo branco inverte. */}

@@ -27,6 +27,38 @@ hora rodando `intelligence` pelo MCP.
 
 ---
 
+## 2026-09-30 — o painel não tinha como dar acesso a ninguém
+
+Servidor migrado para outra VPS (ainda Easypanel), agora em
+`https://comercial.seahubcoworking.com.br` com certificado válido; o domínio
+padrão antigo (`*.rockwe.easypanel.host`) morreu com a VPS velha, e o registro
+local do MCP apontava para ele. Banco veio migrado inteiro: histórico de
+execuções desde 26/08, 10 conferências, 1 contato registrado.
+
+**O relato:** *"o Diego não consegue logar"*. O `login_events` respondeu em uma
+consulta: ele tentou `diegosena@` e `diego@seahubcoworking.com.br` em 30/09,
+11:08 e 19:20, e as quatro tentativas deram **"e-mail inexistente"**. Ele nunca
+teve conta — a migração não perdeu nada. O banco tem **um** usuário desde
+26/08: o administrador que o `bootstrap-admin.mjs` cria das ENV.
+
+Ou seja: o painel viveu cinco semanas **sem nenhuma forma de dar acesso a outra
+pessoa**, e isso era invisível para quem publicou (ele entrava). O que existia
+era a tela **Agentes**, que é cadastro de "quem falou com o cliente" — nome
+parecido, coisa diferente.
+
+Feito: tela **Usuários** (só ADMIN) com criação, troca de perfil, desativar,
+reativar e redefinir senha; senha visível uma vez; travas puras contra trancar
+todo mundo fora; encerramento de sessões ao mudar perfil/desativar/redefinir; e
+um painel de **quem tentou entrar e não tem conta**, que é como a pergunta
+apareceu. Nenhuma ferramenta do MCP cria usuário — ADR-0016.
+
+O login já estava certo e não foi tocado: mensagem única ("e-mail ou senha
+inválidos") com hash-isca, e o motivo real só em `login_events`.
+
+242 testes (eram 231).
+
+---
+
 ## 2026-09-18, noite — o sistema contra o que ele se propõe
 
 Pedido do dono: *"verificar se a consistência do sistema está adequada ao que ele

@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Radar, Users, Zap, ShieldCheck, Cog, Contact, LogOut, type LucideIcon } from "lucide-react";
+import { Radar, Users, Zap, ShieldCheck, Cog, Contact, LogOut, UserCog, type LucideIcon } from "lucide-react";
 import { sair } from "@/lib/auth/actions";
 import { cn, iniciais } from "@/lib/ui";
 import { Assinatura } from "./Logo";
@@ -47,6 +47,19 @@ export const SECOES: { titulo: string; itens: ItemNav[] }[] = [
   },
 ];
 
+/**
+ * Usuários só aparece para ADMIN — é a tela que lista e-mails e perfis, e o
+ * item na navegação para quem não pode abri-la é convite para uma negativa.
+ */
+const ADMINISTRAR: { titulo: string; itens: ItemNav[] } = {
+  titulo: "Administrar",
+  itens: [{ href: "/usuarios", rotulo: "Usuários", Icone: UserCog }],
+};
+
+export function secoesPara(papel?: string): { titulo: string; itens: ItemNav[] }[] {
+  return papel === "ADMIN" ? [...SECOES, ADMINISTRAR] : SECOES;
+}
+
 /** "/" só marca ativo em correspondência exata, senão marcaria tudo. */
 export function estaAtivo(href: string, caminho: string): boolean {
   return href === "/" ? caminho === "/" : caminho.startsWith(href);
@@ -55,14 +68,18 @@ export function estaAtivo(href: string, caminho: string): boolean {
 export function Lateral({
   nome,
   email,
+  papel,
   aoNavegar,
 }: {
   nome: string;
   email?: string;
+  /** Perfil de quem está logado — decide se "Administrar" aparece. */
+  papel?: string;
   /** Fecha a gaveta no celular. No desktop não existe gaveta, então é opcional. */
   aoNavegar?: () => void;
 }) {
   const caminho = usePathname();
+  const secoes = secoesPara(papel);
 
   return (
     <nav className="flex h-full flex-col bg-marca">
@@ -76,7 +93,7 @@ export function Lateral({
       </Link>
 
       <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 pb-4">
-        {SECOES.map((s) => (
+        {secoes.map((s) => (
           <div key={s.titulo}>
             <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--marca-tinta-3)]">
               {s.titulo}
